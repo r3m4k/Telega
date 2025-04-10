@@ -1,4 +1,6 @@
 from sys import argv, exit
+from multiprocessing import freeze_support
+
 from PyQt5.QtWidgets import QApplication, QMainWindow
 from PyQt5.uic import loadUi
 from PyQt5.QtGui import QIcon
@@ -55,6 +57,7 @@ class MainWindow(QMainWindow):
         event.accept()
 
 if __name__ == "__main__":
+    freeze_support()    # Для корректной работы межпроцессорного взаимодействия
     app = QApplication(argv)
     window = MainWindow()
     window.show()

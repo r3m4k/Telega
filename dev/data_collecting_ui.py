@@ -11,7 +11,9 @@ from time import sleep
 from threading import Thread
 
 from message import message
-from com_port import COM_Port
+from com_port_gui import COM_Port_GUI
+from printing import Printing
+
 
 JSON_FILE = '../dev/history.json'
 
@@ -49,8 +51,10 @@ class DataCollectingWindow(QMainWindow):
         self.setWindowTitle('Сбор данных')
         self.setWindowIcon(QIcon('../ui/Telega.ico'))
 
-        self.STM_ComPort = COM_Port()
-        self.GPS_ComPort = COM_Port()
+        self.printer = Printing()
+
+        self.STM_ComPort = COM_Port_GUI(self.printer, "STM")
+        self.GPS_ComPort = COM_Port_GUI(self.printer, "GPS")
 
         # Загрузим данные с прошлого использования
         with open(JSON_FILE, 'r') as json_file:
@@ -65,6 +69,8 @@ class DataCollectingWindow(QMainWindow):
         self.GPS_Settings = [self.ui.COM_Port_GPS_Settings.itemAt(i).widget() for i in range(1, 4)]
 
         self.init_UI()
+
+        self.printer.NewText_Signal.connect(lambda text: self.display(text))
 
     def init_UI(self):
         self.init_Buttons()
