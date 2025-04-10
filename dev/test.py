@@ -1,31 +1,66 @@
-from threading import Thread
+from multiprocessing import Process, Queue
+from multiprocessing.managers import NamespaceProxy, BaseManager
+
+from random import random
 from time import sleep
-from multiprocessing import Process, freeze_support
+
+class MyManager(BaseManager):
+    pass
+
+class MyAwesomeClass:
+    def __init__(self):
+         pass
+
+    def  __del__(self):
+        print('Завершение процесса')
+
+    def working(self, data_container: Queue):
+        while True:
+            data_container.put(str(random() * 100))
+            sleep(0.1)
+
+class MyAwesomeClassProxy(NamespaceProxy):
+    pass
 
 
+class Decoder:
+    def __init__(self):
+        pass
 
-def pause_print():
-    while True:
-        sleep(1)
-        print('+')
+    def reading(self, data_collector: Queue):
+        while True:
+            if not data_collector.empty():
+                data = data_collector.get()
+                print(type(data), data)
+
+class DecoderProxy(NamespaceProxy):
+    pass
 
 
 class Foo:
+    MyManager.register('MyAwesomeClass', MyAwesomeClass, MyAwesomeClassProxy)
+    MyManager.register('DecoderRegisteres', Decoder, DecoderProxy)
+
     def __init__(self):
-        freeze_support()
-        self.process = Process(target=self.infinite_loop, args=(), daemon=True)
+        self.M = MyManager()
+        self.M.start()
+        self.MAC = self.M.MyAwesomeClass()
+        self.decoder = self.M.DecoderRegisteres()
+        self.queue = Queue()
 
-    def infinite_loop(self):
-        print('Infinite loop')
-        while True:
-            continue
-
-    def start(self):
-        self.process.start()
+        self.p1 = Process(target=self.MAC.working, args=(self.queue, ), daemon=True)
+        self.p2 = Process(target=self.decoder.reading, args=(self.queue, ), daemon=True)
 
 
-if __name__ == '__main__':
-    foo = Foo()
-    foo.start()
+    def start_filling(self):
+        self.p1.start()
 
-    pause_print()
+    def start_reading(self):
+        self.p2.start()
+
+    def stop(self):
+        self.p1.terminate()
+        self.p1.join()
+
+        self.p2.terminate()
+        self.p2.join()

@@ -281,16 +281,6 @@
      <string>Сбор данных во время проезда</string>
     </property>
    </widget>
-   <widget class="QListView" name="msgList">
-    <property name="geometry">
-     <rect>
-      <x>1370</x>
-      <y>35</y>
-      <width>371</width>
-      <height>371</height>
-     </rect>
-    </property>
-   </widget>
    <widget class="QWidget" name="horizontalLayoutWidget">
     <property name="geometry">
      <rect>
@@ -985,6 +975,16 @@
     </property>
     <property name="orientation">
      <enum>Qt::Horizontal</enum>
+    </property>
+   </widget>
+   <widget class="QListWidget" name="msgList">
+    <property name="geometry">
+     <rect>
+      <x>1370</x>
+      <y>30</y>
+      <width>371</width>
+      <height>381</height>
+     </rect>
     </property>
    </widget>
   </widget>
