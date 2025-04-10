@@ -1,5 +1,5 @@
 from sys import argv, exit
-from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox
+from PyQt5.QtWidgets import QApplication, QMainWindow
 from PyQt5.uic import loadUi
 from PyQt5.QtGui import QIcon
 
@@ -35,7 +35,7 @@ class MainWindow(QMainWindow):
             self.data_collecting_window.show()
             self.WindowsCounter[0] += 1
         else:
-            message('Закройте предыдущее окно', icon=QMessageBox.Warning)
+            message('Закройте предыдущее окно', icon='Warning')
 
     def close_DataCollectingWindow(self):
         self.WindowsCounter[0] -= 1
@@ -45,7 +45,7 @@ class MainWindow(QMainWindow):
             self.data_processing_window.show()
             self.WindowsCounter[1] += 1
         else:
-            message('Закройте предыдущее окно', icon=QMessageBox.Warning)
+            message('Закройте предыдущее окно', icon='Warning')
 
     def close_DataProcessingWindow(self):
         self.WindowsCounter[1] -= 1

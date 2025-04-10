@@ -7,6 +7,8 @@ import json
 from pprint import pprint, pformat
 from random import random
 from datetime import date
+from time import sleep
+from threading import Thread
 
 from message import message
 from com_port import COM_Port
@@ -75,6 +77,10 @@ class DataCollectingWindow(QMainWindow):
     def closeEvent(self, event):
         self.DataCollectingWindow_Closed.emit()
 
+        # Вызовем деструкторы COM портов для корректного завершения программы
+        self.STM_ComPort.__del__()
+        self.GPS_ComPort.__del__()
+
         # Сохраним данные текущего использования в json файл
         self.json_data["DataCollecting"]["dir"] = self.Saving_Params[Dir][LineEdit].text()      # Сохраним выбранный путь в json файл
         with open(JSON_FILE, 'w') as json_file:
@@ -90,19 +96,19 @@ class DataCollectingWindow(QMainWindow):
 
     ####### Функционал для self.Command_Buttons #######
     def init_Buttons(self):
-        self.Command_Buttons[Start_InitialSetting].clicked.connect(self.start_InitialSetiing)
+        self.Command_Buttons[Start_InitialSetting].clicked.connect(self.start_InitialSetting)
         self.Command_Buttons[Start_Measuring].clicked.connect(self.start_Measuring)
         self.Command_Buttons[Stop_Measuring].clicked.connect(self.stop_Measuring)
         self.Command_Buttons[Stop_ReadingData].clicked.connect(self.stop_ReadingData)
 
-    def start_InitialSetiing(self):
+    def start_InitialSetting(self):
         print('+++')
 
     def start_Measuring(self):
-        print('-+-')
+        self.STM_ComPort.startMeasuring(com_port_name=self.STM_Settings[List].currentText())
 
     def stop_Measuring(self):
-        print('---')
+        self.STM_ComPort.stopMeasuring()
 
     def stop_ReadingData(self):
         print('===')
@@ -128,7 +134,7 @@ class DataCollectingWindow(QMainWindow):
 
         self.Saving_Params[FileName][LineEdit].setText(f'telega_{str(date.today())}')
         self.Saving_Params[FileName][Help_Button].clicked.connect(lambda: message('Шаблонное название файлов - название, которое будет частью каждого файла, '
-                                                                                  'созданного в результате выполнения программы.', icon=QMessageBox.Information))
+                                                                                  'созданного в результате выполнения программы.', icon='Information'))
 
     def set_SavingPath(self):
         path = QFileDialog().getExistingDirectory(self, 'Выберите путь сохранения', '/')
@@ -143,11 +149,11 @@ class DataCollectingWindow(QMainWindow):
         # Зададим значение по умолчанию, если в дескрипторе есть 'STM'
         for port in com_ports.keys():
             if 'STM' in com_ports[port]['desc']:
-                self.STM_Settings[List].setCurrentIndex(com_ports.keys().index(port))
+                self.STM_Settings[List].setCurrentIndex(list(com_ports.keys()).index(port))
 
         self.STM_Settings[Help_Button].clicked.connect(
             lambda: message(self.STM_ComPort.get_ComPorts()[f'{self.STM_Settings[List].currentText()}']["desc"],
-                            icon=QMessageBox.Information)
+                            icon='Information')
         )
 
         self.STM_Settings[UpdateButton].clicked.connect(self.update_STM_ComPorts)
@@ -170,7 +176,7 @@ class DataCollectingWindow(QMainWindow):
 
         self.GPS_Settings[Help_Button].clicked.connect(
             lambda: message(self.GPS_ComPort.get_ComPorts()[f'{self.GPS_Settings[List].currentText()}']["desc"],
-                            icon=QMessageBox.Information)
+                            icon='Information')
         )
 
         self.GPS_Settings[UpdateButton].clicked.connect(self.update_GPS_ComPorts)
