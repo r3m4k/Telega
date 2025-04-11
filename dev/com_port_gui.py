@@ -1,8 +1,13 @@
 import os
+from time import sleep
+import binascii
+
 from threading import Thread
 from multiprocessing import Process, Queue
 from multiprocessing.managers import BaseManager, NamespaceProxy
 from multiprocessing.context import ProcessError
+
+from numpy.ma.core import indices
 
 if os.name == 'nt':  # sys.platform == 'win32':
     from serial.tools.list_ports_windows import comports
@@ -35,58 +40,154 @@ class COM_Port:
         self.port = serial.Serial()         # COM порт, с которым ведётся работа в данном модуле
 
     def __del__(self):
-        # print(f'Закрытие {self.port.port}')
         self.port.close()
 
-    def set_ComPort(self, com_port_name: str):
-        # self.port.port = com_port_name
-        self.port = serial.Serial(port=com_port_name, baudrate=BAUDRATE)
-        self.port.open()
-
-    def startMeasuring(self, com_port_name: str, data_container: Queue, msg_container: Queue):
+    def startMeasuring(self, com_port_name: str, data_queue: Queue, msg_queue: Queue):
         # Откроем COM порт
-        self.port = serial.Serial(port=com_port_name, baudrate=BAUDRATE)
-        if self.port.is_open:
-            self.port.close()
-
         try:
-            self.port.open()
-        except SerialException as error:
-            msg_container.put(f'__Error__{error}')
-            # return
+            self.port = serial.Serial(port=com_port_name, baudrate=BAUDRATE)
+        except serial.serialutil.SerialException as error:
+            msg_queue.put(f'Error__{error}')
+            return
+
+        if not self.port.is_open:
+            try:
+                self.port.open()
+            except SerialException as error:
+                msg_queue.put(f'Error__{error}')
 
         # Начнём чтение данных
-        msg_container.put(f'Начало чтения данных из {self.port.port}')
+        msg_queue.put(f'Начало чтения данных из {self.port.port}')
         try:
-            self.reading_ComPort(data_container)
+            self.reading_ComPort(data_queue)
         except SerialException as error:
-            msg_container.put(f'__Error__{error}')
-            msg_container.put('__Warning__Ошибка чтения порта')
+            msg_queue.put(f'Error__{error}')
+            msg_queue.put('Warning__Ошибка чтения порта')
 
-    def reading_ComPort(self, data_container: Queue):
+    def reading_ComPort(self, data_queue: Queue):
         while True:
-            data_container.put(self.port.read(1))
+            data_queue.put(self.port.read(1))
 
 
 class Decoder:
     def __init__(self):
         pass
 
-    def decoding(self, type_name: str, source_queue: Queue, output_queue: Queue):
+    def decoding(self, type_name: str, source_queue: Queue, output_queue: Queue, msg_queue: Queue):
         if type_name == "STM":
-            self.decoding_STM(source_queue, output_queue)
+            self.decoding_STM(source_queue, output_queue, msg_queue)
         elif type_name == "GPS":
             self.decoding_GPS()
         else:
             raise RuntimeError('Неправильно передан параметр type_name.\n'
                                f'Он может принимать значения "STM" или "GPS", а передан type_name = {type_name}')
 
-    @staticmethod
-    def decoding_STM(source_queue: Queue, output_queue: Queue):
-        while True:
-            if not source_queue.empty():
-                output_queue.put(source_queue.get())
+    def decoding_STM(self, source_queue: Queue, output_queue: Queue, msg_queue: Queue):
+        # Создадим список именованных констант, которые будут использоваться вместо Enum
+        Want7E: int = 0
+        WantE7: int = 1
+        WantSize: int = 2
+        WantFormat: int = 3
+        WantPacketBody: int = 4
+        WantConSum: int = 5
+        ####################
 
+        stage = Want7E
+        titles = ['Time', 'Acc_X', 'Acc_Y', 'Acc_Z', 'Gyro_X', 'Gyro_Y', 'Gyro_Z', 'Temp']
+
+        bytes_buffer = []   # Буфер для байтов, прочитанных из очереди данных
+        data = {}           # Словарь, в который сохраним пакет полученных данных, с ключами titles
+        size = 0            # Количество байтов данных в посылке
+        index = 0           # Индекс байта в пакете данных
+        con_sum = 0         # Посчитанная контрольная сумма
+        Con_Sum = 0         # Полученная контрольная сумма
+
+        msg_queue.put('Начало декодирования данных')
+
+        while True:
+            if source_queue.empty():
+                continue
+            # sleep(0.01)
+            # msg_queue.put(stage)
+
+            bt = int(binascii.hexlify(source_queue.get()), 16)
+            if stage == Want7E:
+                if bt == 126:
+                    stage = WantE7
+                    con_sum = bt
+                    # Обнулим накопленные значения
+                    index = 0
+                    data = {}
+                    bytes_buffer = []
+                else:
+                    stage = Want7E
+
+            elif stage == WantE7:
+                if bt == 231:
+                    stage = WantSize
+                    con_sum += bt
+                else:
+                    stage = Want7E
+
+            elif stage == WantSize:
+                size = bt
+                con_sum += bt
+                stage = WantFormat
+
+            elif stage == WantFormat:
+                _ = bt
+                con_sum += bt
+                stage = WantPacketBody
+
+            elif stage == WantPacketBody:
+                con_sum += 1
+                if index < size:
+                    index += 1
+                    con_sum += bt
+                    bytes_buffer.append(bt)
+
+                if index == size:
+                    stage = WantConSum
+
+            elif stage == WantConSum:
+                Con_Sum = bt
+                msg_queue.put(f'Полученная контрольная сумма: {Con_Sum} || Посчитанная контрольная сумма: {con_sum & 255}')
+                # Сравним Con_Sum и младшие 8 бит con_sum
+                if Con_Sum == (con_sum & 255) or True:
+                    for i in range(size // 2):
+                        # Сохраним полученные данные, полученные в LittleEndianMode в словарь
+                        value = self.mod_code(bytes_buffer[2 * i], bytes_buffer[2 * i + 1])
+                        if index in range(1, size // 2 - 1):
+                            # Для Acc_XYZ и Gyro_XYZ
+                            data[titles[i]] = value / 1000
+                        else:
+                            # Для Time и Temp
+                            data[titles[i]] = value / 100
+                    output_queue.put(data)
+                    msg_queue.put('Контрольная сумма сошлась')
+
+                else:
+                    msg_queue.put('Контрольная сумма не сошлась')
+                    stage = Want7E
+
+    @staticmethod
+    def mod_code(low_bit, high_bit):
+        """
+        Перевод числа high_bit << 8 + low_bit в модифицированном дополнительном коде в
+        классическое с 15-ью значащими битами.
+        :param low_bit: младшие 8 бит числа.
+        :param high_bit: старшие 8 бит числа.
+        :return: классическое знаковое число.
+        """
+        result = high_bit * 256 + low_bit
+        sign_const = result >> 15
+        if sign_const == 1:
+            result &= 32767  # 32767 = 0111 1111 1111 1111
+            # Обрежем старший бит
+            result ^= 32767  # Инвертируем вс биты числа
+            result *= -1
+
+        return result
     def decoding_GPS(self):
         pass
 
@@ -138,7 +239,7 @@ class COM_Port_GUI(QObject):
         self.Decoder = self.manager.Decoder()
 
         self.ComPort_ReadingProcess = Process()
-        self.ComPort_DecodingProcess = Process(target=self.Decoder.decoding, args=(self.decoder_type, self.ComPort_Data, self.Decoded_Data, ), daemon=True)
+        self.ComPort_DecodingProcess = Process(target=self.Decoder.decoding, args=(self.decoder_type, self.ComPort_Data, self.Decoded_Data, self.MessageQueue, ), daemon=True)
         self.Decoded_Data_Checking = Thread(target=self.queue_checking, args=(), daemon=True)
 
     def __del__(self):
@@ -159,9 +260,16 @@ class COM_Port_GUI(QObject):
         self.portName = com_port_name
         self.processingFlag = True
 
+        # По новой инициализируем self.ComPort_ReadingProcess, чтобы передать не пустой параметр self.portName.
+        # Это необходимо тк при инициализации процесса Process(args=(self.portName, ...)) создаётся копия self.portName,
+        # так что если объявить этот процесс в __init__, то в него передастся пустой параметр self.portName,
+        # а дальнейшее изменение self.portName не изменит его значение в этом процессе
         self.ComPort_ReadingProcess = Process(target=self.ComPort.startMeasuring, args=(self.portName, self.ComPort_Data, self.MessageQueue, ), daemon=True)
 
         self.ComPort_ReadingProcess.start()
+
+        sleep(1)    # Время на отрытие COM порта
+
         self.ComPort_DecodingProcess.start()
         self.Decoded_Data_Checking.start()
 
@@ -171,6 +279,8 @@ class COM_Port_GUI(QObject):
 
         self.ComPort_ReadingProcess.terminate()
         self.ComPort_ReadingProcess.join()
+
+        sleep(1)    # Для гарантии завершения обработки self.ComPort_Data
 
         self.ComPort_DecodingProcess.terminate()
         self.ComPort_DecodingProcess.join()
@@ -184,6 +294,6 @@ class COM_Port_GUI(QObject):
                 print(value)
 
             if not self.MessageQueue.empty():
-                self.printer.printing(self.MessageQueue.get())
+                self.printer.printing(text=str(self.MessageQueue.get()))
 
 
