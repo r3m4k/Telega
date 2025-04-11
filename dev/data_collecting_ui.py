@@ -111,6 +111,7 @@ class DataCollectingWindow(QMainWindow):
         print('+++')
 
     def start_Measuring(self):
+        self.Command_Buttons[Start_Measuring].setEnabled(False)
         self.STM_ComPort.startMeasuring(com_port_name=self.STM_Settings[List].currentText())
 
     def stop_Measuring(self):

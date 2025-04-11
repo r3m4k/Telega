@@ -64,3 +64,61 @@ class Foo:
 
         self.p2.terminate()
         self.p2.join()
+
+
+"""
+match stage:
+                case int(Want7E):
+                    if bt == 126:
+                        stage = WantE7
+                        con_sum = bt
+                        # Обнулим накопленные значения
+                        index = 0
+                        data = {}
+                        bytes_buffer = []
+                    else:
+                        stage = Want7E
+
+                case int(WantE7):
+                    if bt == 231:
+                        stage = WantSize
+                        con_sum += bt
+                    else:
+                        stage = Want7E
+
+                case int(WantSize):
+                    size = bt
+                    con_sum += bt
+                    stage = WantFormat
+
+                case int(WantFormat):
+                    _ = bt
+                    con_sum += bt
+                    stage = WantPacketBody
+
+                case int(WantPacketBody):
+                    if index < size:
+                        index += 1
+                        bytes_buffer.append(bt)
+
+                    if index == size:
+                        stage = WantConSum
+
+                case int(WantConSum):
+                    Con_Sum = bt
+                    # Сравним Con_Sum и младшие 8 бит con_sum
+                    if Con_Sum == (con_sum & 255):
+                        for i in range(size // 2):
+                            # Сохраним полученные данные, полученные в LittleEndianMode в словарь
+                            value = self.mod_code(bytes_buffer[2 * i], bytes_buffer[2 * i + 1])
+                            if index in range(1, size // 2 - 1):
+                                # Для Acc_XYZ и Gyro_XYZ
+                                data[titles[i]] = value / 1000
+                            else:
+                                # Для Time и Temp
+                                data[titles[i]] = value / 100
+                        output_queue.put(data)
+
+                    else:
+                        stage = Want7E
+"""
