@@ -71,6 +71,7 @@ class DataCollectingWindow(QMainWindow):
         self.init_UI()
 
         self.printer.NewText_Signal.connect(lambda text: self.display(text))
+        self.STM_ComPort.NewData_Signal.connect(lambda values: self.update_Values(values))
 
     def init_UI(self):
         self.init_Buttons()
@@ -112,7 +113,11 @@ class DataCollectingWindow(QMainWindow):
 
     def start_Measuring(self):
         self.Command_Buttons[Start_Measuring].setEnabled(False)
-        self.STM_ComPort.startMeasuring(com_port_name=self.STM_Settings[List].currentText())
+        self.STM_ComPort.startMeasuring(
+            com_port_name=self.STM_Settings[List].currentText(),
+            saving_path=self.Saving_Params[Dir][LineEdit].text(),
+            template_name=self.Saving_Params[FileName][LineEdit].text()
+        )
 
     def stop_Measuring(self):
         self.STM_ComPort.stopMeasuring()
