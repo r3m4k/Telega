@@ -1,4 +1,5 @@
 import os
+import _io
 from time import sleep
 import binascii
 
@@ -73,16 +74,16 @@ class Decoder:
     def __init__(self):
         pass
 
-    def decoding(self, type_name: str, source_queue: Queue, output_queue: Queue, msg_queue: Queue):
+    def decoding(self, type_name: str, source_queue: Queue, output_queue: Queue, duplicate_queue: Queue, msg_queue: Queue):
         if type_name == "STM":
-            self.decoding_STM(source_queue, output_queue, msg_queue)
+            self.decoding_STM(source_queue, output_queue, duplicate_queue,msg_queue)
         elif type_name == "GPS":
             self.decoding_GPS()
         else:
             raise RuntimeError('Неправильно передан параметр type_name.\n'
                                f'Он может принимать значения "STM" или "GPS", а передан type_name = {type_name}')
 
-    def decoding_STM(self, source_queue: Queue, output_queue: Queue, msg_queue: Queue):
+    def decoding_STM(self, source_queue: Queue, output_queue: Queue, duplicate_queue: Queue, msg_queue: Queue):
         # Создадим список именованных констант, которые будут использоваться вместо Enum
         Want7E: int = 0
         WantE7: int = 1
@@ -107,10 +108,11 @@ class Decoder:
         while True:
             if source_queue.empty():
                 continue
-            # sleep(0.01)
-            # msg_queue.put(stage)
 
-            bt = int(binascii.hexlify(source_queue.get()), 16)
+            val = source_queue.get()
+            bt = int(binascii.hexlify(val), 16)
+            duplicate_queue.put(val)
+            # msg_queue.put(f'{stage} -- {val}')
             if stage == Want7E:
                 if bt == 126:
                     stage = WantE7
@@ -140,7 +142,6 @@ class Decoder:
                 stage = WantPacketBody
 
             elif stage == WantPacketBody:
-                con_sum += 1
                 if index < size:
                     index += 1
                     con_sum += bt
@@ -151,24 +152,27 @@ class Decoder:
 
             elif stage == WantConSum:
                 Con_Sum = bt
-                msg_queue.put(f'Полученная контрольная сумма: {Con_Sum} || Посчитанная контрольная сумма: {con_sum & 255}')
+                # msg_queue.put(f'Полученная контрольная сумма: {Con_Sum} || Посчитанная контрольная сумма: {con_sum & 255}')
                 # Сравним Con_Sum и младшие 8 бит con_sum
-                if Con_Sum == (con_sum & 255) or True:
+                if Con_Sum == (con_sum & 255):
                     for i in range(size // 2):
                         # Сохраним полученные данные, полученные в LittleEndianMode в словарь
                         value = self.mod_code(bytes_buffer[2 * i], bytes_buffer[2 * i + 1])
-                        if index in range(1, size // 2 - 1):
+                        if i == 0:
+                            # Для Time
+                            data[titles[i]] = round(value * 0.25, 3)
+                        elif i in range(1, size // 2 - 1):
                             # Для Acc_XYZ и Gyro_XYZ
                             data[titles[i]] = value / 1000
-                        else:
-                            # Для Time и Temp
+                        elif i == (size // 2) - 1:
+                            # Для Temp
                             data[titles[i]] = value / 100
                     output_queue.put(data)
-                    msg_queue.put('Контрольная сумма сошлась')
+                    # msg_queue.put('Контрольная сумма сошлась')
 
                 else:
                     msg_queue.put('Контрольная сумма не сошлась')
-                    stage = Want7E
+                stage = Want7E
 
     @staticmethod
     def mod_code(low_bit, high_bit):
@@ -188,6 +192,7 @@ class Decoder:
             result *= -1
 
         return result
+
     def decoding_GPS(self):
         pass
 
@@ -219,7 +224,8 @@ class COM_Port_GUI(QObject):
         self.decoder_type = decoder_type    # Тип подключённого датчика по данному порту: STM или GPS
         self.processingFlag = False         # Флаг необходимости анализировать данные. Равен True после self.startMeasuring
                                             # И равен False после self.stopMeasuring
-        self.portName = ''               # Имя COM порта
+        self.portName = ''                  # Имя COM порта
+        self.savingFileName = ''            # Имя файла, куда будут сохраняться данные из COM порта
 
         self.manager = MyManager()
         try:
@@ -227,19 +233,17 @@ class COM_Port_GUI(QObject):
         except ProcessError as error:
             self.printer.printing(error)
 
-        self.ArgsQueue = Queue()        # Очередь, через которую передадим параметры в процесс self.ComPort_ReadingProcess
-                                        # Это необходимо тк при инициализации процесса Process(args=(self.portName, ...)) создаётся копия self.portName,
-                                        # так что дальнейшее изменение self.portName не изменит его значение в другом процессе
 
         self.ComPort_Data = Queue()     # Очередь, куда будет записываться все данные, полученные из self.port
         self.Decoded_Data = Queue()     # Очередь, куда будет записываться декодированные данные из ComPort_Data
+        self.Duplicate_Queue= Queue()   # Очередь, куда будет дублироваться данные из self.ComPort_Data для записи данных в log файл
         self.MessageQueue = Queue()     # Очередь сообщений, полученных из различных процессов
 
         self.ComPort = self.manager.ComPort()
         self.Decoder = self.manager.Decoder()
 
         self.ComPort_ReadingProcess = Process()
-        self.ComPort_DecodingProcess = Process(target=self.Decoder.decoding, args=(self.decoder_type, self.ComPort_Data, self.Decoded_Data, self.MessageQueue, ), daemon=True)
+        self.ComPort_DecodingProcess = Process(target=self.Decoder.decoding, args=(self.decoder_type, self.ComPort_Data, self.Decoded_Data, self.Duplicate_Queue, self.MessageQueue, ), daemon=True)
         self.Decoded_Data_Checking = Thread(target=self.queue_checking, args=(), daemon=True)
 
     def __del__(self):
@@ -256,8 +260,9 @@ class COM_Port_GUI(QObject):
 
     ##### Методы, напрямую вызываемые из GUI #####
 
-    def startMeasuring(self, com_port_name: str):
+    def startMeasuring(self, com_port_name: str, saving_path: str, template_name: str):
         self.portName = com_port_name
+        self.savingFileName = f'{saving_path}/{template_name}_{self.decoder_type}_RawData.bin'
         self.processingFlag = True
 
         # По новой инициализируем self.ComPort_ReadingProcess, чтобы передать не пустой параметр self.portName.
@@ -288,12 +293,21 @@ class COM_Port_GUI(QObject):
     ##############################################
 
     def queue_checking(self):
-        while self.processingFlag:
+        savingFile = open(self.savingFileName, 'wb')
+        print(self.savingFileName)
+        while self.processingFlag: # and self.all_queue_empty():
             if not self.Decoded_Data.empty():
-                value = self.Decoded_Data.get()
-                print(value)
+                values = self.Decoded_Data.get()
+                print(values)
+                self.NewData_Signal.emit(values)
 
             if not self.MessageQueue.empty():
                 self.printer.printing(text=str(self.MessageQueue.get()))
 
+            if not self.Duplicate_Queue.empty():
+                savingFile.write(self.Duplicate_Queue.get())
 
+        savingFile.close()
+
+    def all_queue_empty(self) -> bool:
+        return self.Duplicate_Queue.empty() and self.Decoded_Data.empty() and self.MessageQueue.empty()
