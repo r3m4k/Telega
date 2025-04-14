@@ -103,8 +103,6 @@ class Decoder:
         con_sum = 0         # Посчитанная контрольная сумма
         Con_Sum = 0         # Полученная контрольная сумма
 
-        msg_queue.put('Начало декодирования данных')
-
         while True:
             if source_queue.empty():
                 continue
@@ -152,7 +150,6 @@ class Decoder:
 
             elif stage == WantConSum:
                 Con_Sum = bt
-                # msg_queue.put(f'Полученная контрольная сумма: {Con_Sum} || Посчитанная контрольная сумма: {con_sum & 255}')
                 # Сравним Con_Sum и младшие 8 бит con_sum
                 if Con_Sum == (con_sum & 255):
                     for i in range(size // 2):
@@ -168,7 +165,6 @@ class Decoder:
                             # Для Temp
                             data[titles[i]] = value / 100
                     output_queue.put(data)
-                    # msg_queue.put('Контрольная сумма сошлась')
 
                 else:
                     msg_queue.put('Контрольная сумма не сошлась')
@@ -243,8 +239,8 @@ class COM_Port_GUI(QObject):
         self.Decoder = self.manager.Decoder()
 
         self.ComPort_ReadingProcess = Process()
-        self.ComPort_DecodingProcess = Process(target=self.Decoder.decoding, args=(self.decoder_type, self.ComPort_Data, self.Decoded_Data, self.Duplicate_Queue, self.MessageQueue, ), daemon=True)
-        self.Decoded_Data_Checking = Thread(target=self.queue_checking, args=(), daemon=True)
+        self.ComPort_DecodingProcess = Process()
+        self.Decoded_Data_Checking = Thread()
 
     def __del__(self):
         pass
@@ -284,11 +280,10 @@ class COM_Port_GUI(QObject):
         """
         Запуск процессов
         """
-        # По новой инициализируем self.ComPort_ReadingProcess, чтобы передать не пустой параметр self.portName.
-        # Это необходимо тк при инициализации процесса Process(args=(self.portName, ...)) создаётся копия self.portName,
-        # так что если объявить этот процесс в __init__, то в него передастся пустой параметр self.portName,
-        # а дальнейшее изменение self.portName не изменит его значение в этом процессе
+        # По новой инициализируем все процессы для корректного запуска при повторном вызове функции
         self.ComPort_ReadingProcess = Process(target=self.ComPort.startMeasuring, args=(self.portName, self.ComPort_Data, self.MessageQueue, ), daemon=True)
+        self.ComPort_DecodingProcess = Process(target=self.Decoder.decoding, args=(self.decoder_type, self.ComPort_Data, self.Decoded_Data, self.Duplicate_Queue, self.MessageQueue, ), daemon=True)
+        self.Decoded_Data_Checking = Thread(target=self.queue_checking, args=(), daemon=True)
 
         self.ComPort_ReadingProcess.start()
 

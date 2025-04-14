@@ -63,6 +63,7 @@ class DataCollectingWindow(QMainWindow):
         self.setWindowTitle('Сбор данных')
         self.setWindowIcon(QIcon('../ui/Telega.ico'))
 
+        self.PassageNum = 1     # Номер проезда
         self.printer = Printing()
 
         self.STM_ComPort = COM_Port_GUI(self.printer, "STM")
@@ -79,11 +80,14 @@ class DataCollectingWindow(QMainWindow):
         self.Saving_Params = [[self.ui.SavingSettings_Widget.itemAtPosition(row, column).widget() for column in range(1, 3)] for row in range(2)]
         self.STM_Settings = [self.ui.COM_Port_STM_Settings.itemAt(i).widget() for i in range(1, 4)]
         self.GPS_Settings = [self.ui.COM_Port_GPS_Settings.itemAt(i).widget() for i in range(1, 4)]
+        self.PassageNum_Widget = self.ui.Passage_Num
+        self.PassageNum_Widget.setText(f'№ {self.PassageNum}')
+
 
         # Настройка графиков
         self.pens = [[pg.mkPen(colors[data][axis], width=2) for axis in [X, Y, Z]] for data in [Acc, Gyro]]
         self.lines = [[self.Plots[data][axis].plot() for axis in [X, Y, Z]] for data in [Acc, Gyro]]
-        self.x_index = 0    # Индекс полученного пакета данных
+        self.x_index = 0
         self.x_array = np.arange(0, MAX_X_LENGTH * PERIOD, PERIOD)
         self.plot_values = {"Acc_X": np.zeros_like(self.x_array), "Acc_Y": np.zeros_like(self.x_array), "Acc_Z": np.zeros_like(self.x_array),
                             "Gyro_X": np.zeros_like(self.x_array), "Gyro_Y": np.zeros_like(self.x_array), "Gyro_Z": np.zeros_like(self.x_array)}
@@ -138,15 +142,12 @@ class DataCollectingWindow(QMainWindow):
         self.Saving_Params[Dir][Help_Button].setEnabled(False)
 
         self.Saving_Params[FileName][LineEdit].setReadOnly(True)
-        self.Saving_Params[FileName][Help_Button].setEnabled(False)
 
         # Заблокируем параметры COM портов
-        self.STM_Settings[List].setEditable(False)
-        self.STM_Settings[Help_Button].setEnabled(False)
+        self.STM_Settings[List].setEnabled(False)
         self.STM_Settings[UpdateButton].setEnabled(False)
 
-        self.GPS_Settings[List].setEditable(False)
-        self.GPS_Settings[Help_Button].setEnabled(False)
+        self.GPS_Settings[List].setEnabled(False)
         self.GPS_Settings[UpdateButton].setEnabled(False)
 
     def unblockInputs(self):
@@ -162,15 +163,12 @@ class DataCollectingWindow(QMainWindow):
         self.Saving_Params[Dir][Help_Button].setEnabled(True)
 
         self.Saving_Params[FileName][LineEdit].setReadOnly(False)
-        self.Saving_Params[FileName][Help_Button].setEnabled(True)
 
         # Разблокируем параметры COM портов
-        self.STM_Settings[List].setEditable(True)
-        self.STM_Settings[Help_Button].setEnabled(True)
+        self.STM_Settings[List].setEnabled(True)
         self.STM_Settings[UpdateButton].setEnabled(True)
 
-        self.GPS_Settings[List].setEditable(True)
-        self.GPS_Settings[Help_Button].setEnabled(True)
+        self.GPS_Settings[List].setEnabled(True)
         self.GPS_Settings[UpdateButton].setEnabled(True)
 
     ####### Функционал для self.Command_Buttons #######
@@ -185,6 +183,13 @@ class DataCollectingWindow(QMainWindow):
 
     def start_Measuring(self):
         self.blockInputs()
+        self.PassageNum_Widget.setText(f'№ {self.PassageNum}')
+
+        # Сбросим накопленные данные
+        self.x_index = 0    # Индекс полученного пакета данных
+        # self.x_array = np.arange(0, MAX_X_LENGTH * PERIOD, PERIOD)
+        # self.plot_values = {"Acc_X": np.zeros_like(self.x_array), "Acc_Y": np.zeros_like(self.x_array), "Acc_Z": np.zeros_like(self.x_array),
+        #                     "Gyro_X": np.zeros_like(self.x_array), "Gyro_Y": np.zeros_like(self.x_array), "Gyro_Z": np.zeros_like(self.x_array)}
 
         self.STM_ComPort.startMeasuring(
             com_port_name=self.STM_Settings[List].currentText(),
@@ -195,6 +200,7 @@ class DataCollectingWindow(QMainWindow):
     def stop_Measuring(self):
         self.unblockInputs()
         self.STM_ComPort.stopMeasuring()
+        self.PassageNum += 1
 
     def stop_ReadingData(self):
         print('===')
