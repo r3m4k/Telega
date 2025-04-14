@@ -1,7 +1,10 @@
+import numpy as np
 from PyQt5.QtGui import QIcon
 from PyQt5.uic import loadUi
 from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QLabel, QProgressBar, QPushButton, QFileDialog, QGridLayout, QMessageBox
 from PyQt5.QtCore import QObject, pyqtSignal, QEvent
+from PyQt5 import QtCore
+import pyqtgraph as pg
 
 import json
 from pprint import pprint, pformat
@@ -33,12 +36,21 @@ Acc = 0; Gyro = 1
 # Индексы для Values_Widget
 Value_Acc = 2; Value_Gyro = 4
 
-# Индексы для Setting_Widgets
+# Индексы для Setting_Widgets (COM_Port settings)
 List = 0; Help_Button = 1; UpdateButton = 2
 
 # Индексы для SavingSetting_Widgets
 Dir = 0; FileName = 1
 LineEdit = 0
+
+# Параметры для графиков
+titles = ["Acc_X", "Acc_Y", "Acc_Z", "Gyro_X", "Gyro_Y", "Gyro_Z"]
+colors = [["#1F77B4", "#D62728", "#2CA02C"],
+          ["#17BECF", "#FF7F0E", "#9467BD"]]
+y_labels = [["Acc_X, m/s**2", "Acc_Y, m/s**2", "Acc_Z, m/s**2"],
+            ["Gyro_X, mdps", "Gyro_Y, mdps", "Gyro_Z, mdps"]]
+MAX_X_LENGTH = 32       # Максимальное количество точек на графиках
+PERIOD = 0.25           # Период получения данных с платы STM
 
 
 class DataCollectingWindow(QMainWindow):
@@ -68,10 +80,18 @@ class DataCollectingWindow(QMainWindow):
         self.STM_Settings = [self.ui.COM_Port_STM_Settings.itemAt(i).widget() for i in range(1, 4)]
         self.GPS_Settings = [self.ui.COM_Port_GPS_Settings.itemAt(i).widget() for i in range(1, 4)]
 
+        # Настройка графиков
+        self.pens = [[pg.mkPen(colors[data][axis], width=2) for axis in [X, Y, Z]] for data in [Acc, Gyro]]
+        self.lines = [[self.Plots[data][axis].plot() for axis in [X, Y, Z]] for data in [Acc, Gyro]]
+        self.x_index = 0    # Индекс полученного пакета данных
+        self.x_array = np.arange(0, MAX_X_LENGTH * PERIOD, PERIOD)
+        self.plot_values = {"Acc_X": np.zeros_like(self.x_array), "Acc_Y": np.zeros_like(self.x_array), "Acc_Z": np.zeros_like(self.x_array),
+                            "Gyro_X": np.zeros_like(self.x_array), "Gyro_Y": np.zeros_like(self.x_array), "Gyro_Z": np.zeros_like(self.x_array)}
+
         self.init_UI()
 
         self.printer.NewText_Signal.connect(lambda text: self.display(text))
-        self.STM_ComPort.NewData_Signal.connect(lambda values: self.update_Values(values))
+        self.STM_ComPort.NewData_Signal.connect(lambda values: self.update_Data(values))
 
     def init_UI(self):
         self.init_Buttons()
@@ -101,6 +121,58 @@ class DataCollectingWindow(QMainWindow):
         """
         self.ui.msgList.addItem(text)
 
+    def update_Data(self, data: dir):
+        self.update_Plots(data)
+        self.update_Values(data)
+
+    def blockInputs(self):
+        """
+        Блокировка виджетов, предназначенных для ввода информации от пользователя для корректной работы программы
+        """
+        # Заблокируем кнопки управления
+        self.Command_Buttons[Start_InitialSetting].setEnabled(False)
+        self.Command_Buttons[Start_Measuring].setEnabled(False)
+
+        # Заблокируем параметры сохранения
+        self.Saving_Params[Dir][LineEdit].setReadOnly(True)
+        self.Saving_Params[Dir][Help_Button].setEnabled(False)
+
+        self.Saving_Params[FileName][LineEdit].setReadOnly(True)
+        self.Saving_Params[FileName][Help_Button].setEnabled(False)
+
+        # Заблокируем параметры COM портов
+        self.STM_Settings[List].setEditable(False)
+        self.STM_Settings[Help_Button].setEnabled(False)
+        self.STM_Settings[UpdateButton].setEnabled(False)
+
+        self.GPS_Settings[List].setEditable(False)
+        self.GPS_Settings[Help_Button].setEnabled(False)
+        self.GPS_Settings[UpdateButton].setEnabled(False)
+
+    def unblockInputs(self):
+        """
+        Разблокировка виджетов, предназначенных для ввода информации от пользователя
+        """
+        # Разблокируем кнопки управления
+        self.Command_Buttons[Start_InitialSetting].setEnabled(True)
+        self.Command_Buttons[Start_Measuring].setEnabled(True)
+
+        # Разблокируем параметры сохранения
+        self.Saving_Params[Dir][LineEdit].setReadOnly(False)
+        self.Saving_Params[Dir][Help_Button].setEnabled(True)
+
+        self.Saving_Params[FileName][LineEdit].setReadOnly(False)
+        self.Saving_Params[FileName][Help_Button].setEnabled(True)
+
+        # Разблокируем параметры COM портов
+        self.STM_Settings[List].setEditable(True)
+        self.STM_Settings[Help_Button].setEnabled(True)
+        self.STM_Settings[UpdateButton].setEnabled(True)
+
+        self.GPS_Settings[List].setEditable(True)
+        self.GPS_Settings[Help_Button].setEnabled(True)
+        self.GPS_Settings[UpdateButton].setEnabled(True)
+
     ####### Функционал для self.Command_Buttons #######
     def init_Buttons(self):
         self.Command_Buttons[Start_InitialSetting].clicked.connect(self.start_InitialSetting)
@@ -112,7 +184,8 @@ class DataCollectingWindow(QMainWindow):
         print('+++')
 
     def start_Measuring(self):
-        self.Command_Buttons[Start_Measuring].setEnabled(False)
+        self.blockInputs()
+
         self.STM_ComPort.startMeasuring(
             com_port_name=self.STM_Settings[List].currentText(),
             saving_path=self.Saving_Params[Dir][LineEdit].text(),
@@ -120,6 +193,7 @@ class DataCollectingWindow(QMainWindow):
         )
 
     def stop_Measuring(self):
+        self.unblockInputs()
         self.STM_ComPort.stopMeasuring()
 
     def stop_ReadingData(self):
@@ -130,14 +204,48 @@ class DataCollectingWindow(QMainWindow):
         for data in [Acc, Gyro]:
             for axis in [X, Y, Z]:
                 self.Plots[data][axis].setBackground("w")
+                self.Plots[data][axis].showGrid(x=True, y=True)
+                plot_style = {"color": "grey", "font-size": "14px"}
+                self.Plots[data][axis].setLabel("left", y_labels[data][axis], **plot_style)
+                if axis == Z:
+                    self.Plots[data][axis].setLabel("bottom", "Time, seconds", **plot_style)
+
+                self.lines[data][axis] = self.Plots[data][axis].plot(self.x_array, self.plot_values[titles[3 * data + axis]], pen=self.pens[data][axis])
+
+    def update_Plots(self, values: dir):
+        if self.x_index < MAX_X_LENGTH:
+            self.x_array[self.x_index] = values["Time"]
+            for title in titles:
+                self.plot_values[title][self.x_index] = values[title]
+
+            # Если получили первую посылку данных, то выровняем графики
+            if self.x_index == 0:
+                self.x_array = np.arange(values["Time"], values["Time"] + MAX_X_LENGTH * PERIOD, PERIOD)
+                for data in [Acc, Gyro]:
+                    for axis in [X, Y, Z]:
+                        for index in range(1, len(self.x_array)):
+                            self.plot_values[titles[3 * data + axis]][index] = self.plot_values[titles[3 * data + axis]][0]
+
+            self.x_index += 1
+
+        else:
+            self.x_array = self.x_array[1:]
+            self.x_array = np.append(self.x_array, values["Time"])
+            for title in titles:
+                self.plot_values[title] = self.plot_values[title][1:]
+                self.plot_values[title] = np.append(self.plot_values[title], values[title])
+
+        for data in [Acc, Gyro]:
+            for axis in [X, Y, Z]:
+                self.lines[data][axis].setData(self.x_array, self.plot_values[titles[3 * data + axis]])
 
     ####### Функционал для self.Sensor_Values #######
     def init_Values(self):
         pass
 
-    def update_Values(self, data: dir):
-        self.Sensor_Values[Acc][X].display(data['Acc_X']); self.Sensor_Values[Acc][Y].display(data['Acc_Y']); self.Sensor_Values[Acc][Z].display(data['Acc_Z'])
-        self.Sensor_Values[Gyro][X].display(data['Gyro_X']); self.Sensor_Values[Gyro][Y].display(data['Gyro_Y']); self.Sensor_Values[Gyro][Z].display(data['Gyro_Z'])
+    def update_Values(self, values: dir):
+        self.Sensor_Values[Acc][X].display(values['Acc_X']); self.Sensor_Values[Acc][Y].display(values['Acc_Y']); self.Sensor_Values[Acc][Z].display(values['Acc_Z'])
+        self.Sensor_Values[Gyro][X].display(values['Gyro_X']); self.Sensor_Values[Gyro][Y].display(values['Gyro_Y']); self.Sensor_Values[Gyro][Z].display(values['Gyro_Z'])
 
     ####### Функционал для self.SavingSettings_Widget #######
     def init_SavingSettings(self):

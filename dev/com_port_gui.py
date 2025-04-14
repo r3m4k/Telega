@@ -264,19 +264,7 @@ class COM_Port_GUI(QObject):
         self.portName = com_port_name
         self.savingFileName = f'{saving_path}/{template_name}_{self.decoder_type}_RawData.bin'
         self.processingFlag = True
-
-        # По новой инициализируем self.ComPort_ReadingProcess, чтобы передать не пустой параметр self.portName.
-        # Это необходимо тк при инициализации процесса Process(args=(self.portName, ...)) создаётся копия self.portName,
-        # так что если объявить этот процесс в __init__, то в него передастся пустой параметр self.portName,
-        # а дальнейшее изменение self.portName не изменит его значение в этом процессе
-        self.ComPort_ReadingProcess = Process(target=self.ComPort.startMeasuring, args=(self.portName, self.ComPort_Data, self.MessageQueue, ), daemon=True)
-
-        self.ComPort_ReadingProcess.start()
-
-        sleep(1)    # Время на отрытие COM порта
-
-        self.ComPort_DecodingProcess.start()
-        self.Decoded_Data_Checking.start()
+        self.start_Processes()
 
     def stopMeasuring(self):
         self.printer.printing('Конец чтения данных')
@@ -292,13 +280,30 @@ class COM_Port_GUI(QObject):
 
     ##############################################
 
+    def start_Processes(self):
+        """
+        Запуск процессов
+        """
+        # По новой инициализируем self.ComPort_ReadingProcess, чтобы передать не пустой параметр self.portName.
+        # Это необходимо тк при инициализации процесса Process(args=(self.portName, ...)) создаётся копия self.portName,
+        # так что если объявить этот процесс в __init__, то в него передастся пустой параметр self.portName,
+        # а дальнейшее изменение self.portName не изменит его значение в этом процессе
+        self.ComPort_ReadingProcess = Process(target=self.ComPort.startMeasuring, args=(self.portName, self.ComPort_Data, self.MessageQueue, ), daemon=True)
+
+        self.ComPort_ReadingProcess.start()
+
+        sleep(1)    # Время на отрытие COM порта
+
+        self.ComPort_DecodingProcess.start()
+        self.Decoded_Data_Checking.start()
+
     def queue_checking(self):
         savingFile = open(self.savingFileName, 'wb')
         print(self.savingFileName)
         while self.processingFlag: # and self.all_queue_empty():
             if not self.Decoded_Data.empty():
                 values = self.Decoded_Data.get()
-                print(values)
+                # print(values)
                 self.NewData_Signal.emit(values)
 
             if not self.MessageQueue.empty():
