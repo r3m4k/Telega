@@ -2,7 +2,7 @@ import numpy as np
 from PyQt5.QtGui import QIcon
 from PyQt5.uic import loadUi
 from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QLabel, QProgressBar, QPushButton, QFileDialog, QGridLayout, QMessageBox
-from PyQt5.QtCore import QObject, pyqtSignal, QEvent
+from PyQt5.QtCore import QObject, pyqtSignal, QEvent, Qt
 from PyQt5 import QtCore
 import pyqtgraph as pg
 
@@ -14,7 +14,7 @@ from time import sleep
 from threading import Thread
 
 from message import message
-from com_port_gui import COM_Port_GUI
+from com_port import COM_Port_GUI
 from printing import Printing
 
 
@@ -63,11 +63,8 @@ class DataCollectingWindow(QMainWindow):
         self.setWindowTitle('Сбор данных')
         self.setWindowIcon(QIcon('../ui/Telega.ico'))
 
-        self.PassageNum = 1     # Номер проезда
-        self.printer = Printing()
-
-        self.STM_ComPort = COM_Port_GUI(self.printer, "STM")
-        self.GPS_ComPort = COM_Port_GUI(self.printer, "GPS")
+        self.PassageNum = 1                 # Номер проезда
+        self.UsingGpsFlag: bool = True      # Флаг использования GPS модуля
 
         # Загрузим данные с прошлого использования
         with open(JSON_FILE, 'r') as json_file:
@@ -80,9 +77,14 @@ class DataCollectingWindow(QMainWindow):
         self.Saving_Params = [[self.ui.SavingSettings_Widget.itemAtPosition(row, column).widget() for column in range(1, 3)] for row in range(2)]
         self.STM_Settings = [self.ui.COM_Port_STM_Settings.itemAt(i).widget() for i in range(1, 4)]
         self.GPS_Settings = [self.ui.COM_Port_GPS_Settings.itemAt(i).widget() for i in range(1, 4)]
+        self.Latitude_Value = self.ui.Latitude_Value
+        self.Longitude_Value = self.ui.Longitude_Value
         self.PassageNum_Widget = self.ui.Passage_Num
+        self.GPS_CheckBox = self.ui.GPScheckBox
+        #-------------------
         self.PassageNum_Widget.setText(f'№ {self.PassageNum}')
-
+        self.GPS_CheckBox.setChecked(True)
+        #-------------------
 
         # Настройка графиков
         self.pens = [[pg.mkPen(colors[data][axis], width=2) for axis in [X, Y, Z]] for data in [Acc, Gyro]]
@@ -92,10 +94,17 @@ class DataCollectingWindow(QMainWindow):
         self.plot_values = {"Acc_X": np.zeros_like(self.x_array), "Acc_Y": np.zeros_like(self.x_array), "Acc_Z": np.zeros_like(self.x_array),
                             "Gyro_X": np.zeros_like(self.x_array), "Gyro_Y": np.zeros_like(self.x_array), "Gyro_Z": np.zeros_like(self.x_array)}
 
+        # Создадим нужные экземпляры классов
+        self.printer = Printing()
+        self.STM_ComPort = COM_Port_GUI(self.printer, "STM")
+        self.GPS_ComPort = COM_Port_GUI(self.printer, "GPS")
+
         self.init_UI()
 
+        # Подключим сигналы
         self.printer.NewText_Signal.connect(lambda text: self.display(text))
         self.STM_ComPort.NewData_Signal.connect(lambda values: self.update_Data(values))
+        self.GPS_ComPort.NewData_Signal.connect(lambda values: self.update_Data(values))
 
     def init_UI(self):
         self.init_Buttons()
@@ -125,9 +134,19 @@ class DataCollectingWindow(QMainWindow):
         """
         self.ui.msgList.addItem(text)
 
-    def update_Data(self, data: dir):
-        self.update_Plots(data)
-        self.update_Values(data)
+    def update_Data(self, values: dir):
+        if 'Latitude' in list(values.keys()):
+            self.update_GPSData(values)
+        elif 'Acc_X' in list(values.keys()):
+            self.update_STMData(values)
+
+    def update_STMData(self, values: dir):
+        self.update_Plots(values)
+        self.update_Values(values)
+
+    def update_GPSData(self, values: dir):
+        self.Latitude_Value.display(values['Latitude'])
+        self.Longitude_Value.display(values['Longitude'])
 
     def blockInputs(self):
         """
@@ -150,6 +169,8 @@ class DataCollectingWindow(QMainWindow):
         self.GPS_Settings[List].setEnabled(False)
         self.GPS_Settings[UpdateButton].setEnabled(False)
 
+        self.GPS_CheckBox.setEnabled(False)
+
     def unblockInputs(self):
         """
         Разблокировка виджетов, предназначенных для ввода информации от пользователя
@@ -171,6 +192,8 @@ class DataCollectingWindow(QMainWindow):
         self.GPS_Settings[List].setEnabled(True)
         self.GPS_Settings[UpdateButton].setEnabled(True)
 
+        self.GPS_CheckBox.setEnabled(True)
+
     ####### Функционал для self.Command_Buttons #######
     def init_Buttons(self):
         self.Command_Buttons[Start_InitialSetting].clicked.connect(self.start_InitialSetting)
@@ -178,28 +201,59 @@ class DataCollectingWindow(QMainWindow):
         self.Command_Buttons[Stop_Measuring].clicked.connect(self.stop_Measuring)
         self.Command_Buttons[Stop_ReadingData].clicked.connect(self.stop_ReadingData)
 
+        self.Command_Buttons[Stop_Measuring].setEnabled(False)
+        self.Command_Buttons[Stop_ReadingData].setEnabled(False)
+
     def start_InitialSetting(self):
         print('+++')
 
     def start_Measuring(self):
-        self.blockInputs()
         self.PassageNum_Widget.setText(f'№ {self.PassageNum}')
 
         # Сбросим накопленные данные
         self.x_index = 0    # Индекс полученного пакета данных
-        # self.x_array = np.arange(0, MAX_X_LENGTH * PERIOD, PERIOD)
-        # self.plot_values = {"Acc_X": np.zeros_like(self.x_array), "Acc_Y": np.zeros_like(self.x_array), "Acc_Z": np.zeros_like(self.x_array),
-        #                     "Gyro_X": np.zeros_like(self.x_array), "Gyro_Y": np.zeros_like(self.x_array), "Gyro_Z": np.zeros_like(self.x_array)}
+
+        # Запуск чтения данных с платы STM
+        if self.STM_Settings[List].currentText() == '-----':
+            message('Выберите корректный COM порт для STM', icon='Warning')
+            return
+
+        # Запуск чтения данных с модуля GPS
+        if self.GPS_CheckBox.checkState() == Qt.CheckState.Checked:
+            if self.GPS_Settings[List].currentText() == '-----':
+                message('Выберите корректный COM порт для GPS', icon='Warning')
+                return
+        else:
+            self.printer.printing(text='GPS модуль не подключён!')
+
+        self.blockInputs()
+
+        self.Command_Buttons[Stop_Measuring].setEnabled(True)
+        self.Command_Buttons[Stop_ReadingData].setEnabled(True)
 
         self.STM_ComPort.startMeasuring(
             com_port_name=self.STM_Settings[List].currentText(),
             saving_path=self.Saving_Params[Dir][LineEdit].text(),
-            template_name=self.Saving_Params[FileName][LineEdit].text()
+            template_name=self.Saving_Params[FileName][LineEdit].text(),
+            data_type=f'RawData_{self.PassageNum}'
         )
+
+        self.GPS_ComPort.startMeasuring(
+            com_port_name=self.GPS_Settings[List].currentText(),
+            saving_path=self.Saving_Params[Dir][LineEdit].text(),
+            template_name=self.Saving_Params[FileName][LineEdit].text(),
+            data_type='RawData'
+        )
+
 
     def stop_Measuring(self):
         self.unblockInputs()
+
+        self.Command_Buttons[Stop_Measuring].setEnabled(True)
+        self.Command_Buttons[Stop_ReadingData].setEnabled(True)
+
         self.STM_ComPort.stopMeasuring()
+        self.GPS_ComPort.stopMeasuring()
         self.PassageNum += 1
 
     def stop_ReadingData(self):

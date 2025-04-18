@@ -2,13 +2,12 @@ import os
 import _io
 from time import sleep
 import binascii
+from random import random
 
 from threading import Thread
 from multiprocessing import Process, Queue
 from multiprocessing.managers import BaseManager, NamespaceProxy
 from multiprocessing.context import ProcessError
-
-from numpy.ma.core import indices
 
 if os.name == 'nt':  # sys.platform == 'win32':
     from serial.tools.list_ports_windows import comports
@@ -29,7 +28,7 @@ from printing import Printing
 Менеджер создает так называемый прокси‑объект для каждого процесса, и процессы обращаются именно к прокси‑объекту.
 """
 
-BAUDRATE = 115200       # Скорость работы COM порта
+BAUDRATE = {"STM": 115200, "GPS": 4800}       # Скорость работы COM порта
 
 
 class MyManager(BaseManager):
@@ -43,10 +42,10 @@ class COM_Port:
     def __del__(self):
         self.port.close()
 
-    def startMeasuring(self, com_port_name: str, data_queue: Queue, msg_queue: Queue):
+    def startMeasuring(self, com_port_name: str, baudrate: int, data_queue: Queue, msg_queue: Queue):
         # Откроем COM порт
         try:
-            self.port = serial.Serial(port=com_port_name, baudrate=BAUDRATE)
+            self.port = serial.Serial(port=com_port_name, baudrate=baudrate)
         except serial.serialutil.SerialException as error:
             msg_queue.put(f'Error__{error}')
             return
@@ -76,9 +75,9 @@ class Decoder:
 
     def decoding(self, type_name: str, source_queue: Queue, output_queue: Queue, duplicate_queue: Queue, msg_queue: Queue):
         if type_name == "STM":
-            self.decoding_STM(source_queue, output_queue, duplicate_queue,msg_queue)
+            self.decoding_STM(source_queue, output_queue, duplicate_queue, msg_queue)
         elif type_name == "GPS":
-            self.decoding_GPS()
+            self.decoding_GPS(source_queue, output_queue, duplicate_queue, msg_queue)
         else:
             raise RuntimeError('Неправильно передан параметр type_name.\n'
                                f'Он может принимать значения "STM" или "GPS", а передан type_name = {type_name}')
@@ -107,14 +106,13 @@ class Decoder:
             if source_queue.empty():
                 continue
 
-            val = source_queue.get()
-            bt = int(binascii.hexlify(val), 16)
-            duplicate_queue.put(val)
-            # msg_queue.put(f'{stage} -- {val}')
+            bt = source_queue.get()
+            duplicate_queue.put(bt)
+            val = int(binascii.hexlify(bt), 16)
             if stage == Want7E:
-                if bt == 126:
+                if val == 126:
                     stage = WantE7
-                    con_sum = bt
+                    con_sum = val
                     # Обнулим накопленные значения
                     index = 0
                     data = {}
@@ -123,33 +121,33 @@ class Decoder:
                     stage = Want7E
 
             elif stage == WantE7:
-                if bt == 231:
+                if val == 231:
                     stage = WantSize
-                    con_sum += bt
+                    con_sum += val
                 else:
                     stage = Want7E
 
             elif stage == WantSize:
-                size = bt
-                con_sum += bt
+                size = val
+                con_sum += val
                 stage = WantFormat
 
             elif stage == WantFormat:
-                _ = bt
-                con_sum += bt
+                _ = val
+                con_sum += val
                 stage = WantPacketBody
 
             elif stage == WantPacketBody:
                 if index < size:
                     index += 1
-                    con_sum += bt
-                    bytes_buffer.append(bt)
+                    con_sum += val
+                    bytes_buffer.append(val)
 
                 if index == size:
                     stage = WantConSum
 
             elif stage == WantConSum:
-                Con_Sum = bt
+                Con_Sum = val
                 # Сравним Con_Sum и младшие 8 бит con_sum
                 if Con_Sum == (con_sum & 255):
                     for i in range(size // 2):
@@ -189,8 +187,81 @@ class Decoder:
 
         return result
 
-    def decoding_GPS(self):
-        pass
+    @staticmethod
+    def decoding_GPS(source_queue: Queue, output_queue: Queue, duplicate_queue: Queue, msg_queue: Queue):
+        # Создадим список именованных констант, которые будут использоваться вместо Enum
+        WantBegin: int = 0
+        WantIdentifier: int = 1
+        WantPacketBody: int = 2
+        WantConSumFirst: int = 3
+        WantConSumSecond: int = 4
+        ####################
+        # Список ASCII кодов используемых символов
+        StartCode = 0x24
+        SeparatorCode = 0x2A
+        CRCode = 0x0D
+        LFCode = 0x0A
+        ####################
+
+        stage: int = WantBegin
+        data: str = ''      # Полученная строка
+        header: str = ''    # 5-буквенный идентификатор сообщения. GPGLL — координаты, широта/долгота датчика
+        index = 0           # Индекс байта в пакете данных
+        con_sum = 0         # Посчитанная контрольная сумма
+        Con_Sum = ''        # Полученная контрольная сумма
+
+        while True:
+            if source_queue.empty():
+                continue
+
+            bt = source_queue.get()
+            duplicate_queue.put(bt)
+            val = int(binascii.hexlify(bt), 16)
+
+            if stage == WantBegin:
+                if val == StartCode:
+                    stage = WantIdentifier
+                    index = 0
+                    data = '$'
+
+            elif stage == WantIdentifier:
+                header += chr(val)
+                if index < 5:   # 5-буквенный идентификатор сообщения
+                    index += 1
+                if index == 5:
+                    if header == 'GPGLL':
+                        # Рассматриваем только строки с данными текущих координат
+                        stage = WantPacketBody
+                        con_sum = 0x50      # XOR header
+                        data += 'GPGLL'
+                    else:
+                        stage = WantBegin
+                        data = ''
+                        header = ''
+                        con_sum = 0
+
+            elif stage == WantPacketBody:
+                data += chr(val)
+                if val != SeparatorCode:
+                    con_sum ^= val
+                else:
+                    stage = WantConSumFirst
+
+            elif stage == WantConSumFirst:
+                # Считаем первый символ контрольной суммы
+                Con_Sum += chr(val)
+                stage = WantConSumSecond
+
+            elif stage == WantConSumSecond:
+                # Считаем второй символ контрольной суммы
+                Con_Sum += chr(val)
+                if Con_Sum == f'{con_sum:02X}':
+                    output_queue.put(data)
+                else:
+                    msg_queue.put(f'{data}      '
+                                  f'Контрольная сумма не сошлась: {Con_Sum} | {con_sum:02X}')
+                stage = WantBegin
+                Con_Sum = ''
 
 ########## Прокси классы ##########
 """
@@ -243,7 +314,7 @@ class COM_Port_GUI(QObject):
         self.Decoded_Data_Checking = Thread()
 
     def __del__(self):
-        pass
+        self.stop_Processes()
 
     @staticmethod
     def get_ComPorts() -> dir:
@@ -256,23 +327,16 @@ class COM_Port_GUI(QObject):
 
     ##### Методы, напрямую вызываемые из GUI #####
 
-    def startMeasuring(self, com_port_name: str, saving_path: str, template_name: str):
+    def startMeasuring(self, com_port_name: str, saving_path: str, template_name: str, data_type: str):
+        print(com_port_name)
         self.portName = com_port_name
-        self.savingFileName = f'{saving_path}/{template_name}_{self.decoder_type}_RawData.bin'
+        self.savingFileName = f'{saving_path}/{template_name}_{self.decoder_type}_{data_type}.bin'
         self.processingFlag = True
         self.start_Processes()
 
     def stopMeasuring(self):
         self.printer.printing('Конец чтения данных')
-        self.processingFlag = False
-
-        self.ComPort_ReadingProcess.terminate()
-        self.ComPort_ReadingProcess.join()
-
-        sleep(1)    # Для гарантии завершения обработки self.ComPort_Data
-
-        self.ComPort_DecodingProcess.terminate()
-        self.ComPort_DecodingProcess.join()
+        self.stop_Processes()
 
     ##############################################
 
@@ -281,25 +345,64 @@ class COM_Port_GUI(QObject):
         Запуск процессов
         """
         # По новой инициализируем все процессы для корректного запуска при повторном вызове функции
-        self.ComPort_ReadingProcess = Process(target=self.ComPort.startMeasuring, args=(self.portName, self.ComPort_Data, self.MessageQueue, ), daemon=True)
+        self.ComPort_ReadingProcess = Process(target=self.ComPort.startMeasuring, args=(self.portName, BAUDRATE[self.decoder_type],self.ComPort_Data, self.MessageQueue, ), daemon=True)
         self.ComPort_DecodingProcess = Process(target=self.Decoder.decoding, args=(self.decoder_type, self.ComPort_Data, self.Decoded_Data, self.Duplicate_Queue, self.MessageQueue, ), daemon=True)
         self.Decoded_Data_Checking = Thread(target=self.queue_checking, args=(), daemon=True)
 
         self.ComPort_ReadingProcess.start()
 
-        sleep(1)    # Время на отрытие COM порта
+        sleep(0.5)    # Время на отрытие COM порта
 
         self.ComPort_DecodingProcess.start()
         self.Decoded_Data_Checking.start()
 
+    def stop_Processes(self):
+        self.processingFlag = False
+
+        # Если попытаться закрыть процесс, который уже был закрыт, то поймаем исключение AttributeError
+        try:
+            self.ComPort_ReadingProcess.terminate()
+            self.ComPort_ReadingProcess.join()
+            sleep(0.5)    # Для гарантии завершения обработки self.ComPort_Data
+        except AttributeError:
+            pass
+
+        try:
+            self.ComPort_DecodingProcess.terminate()
+            self.ComPort_DecodingProcess.join()
+        except AttributeError:
+            pass
+
+        try:
+            self.Decoded_Data_Checking.join()
+        except RuntimeError:
+            pass
+
     def queue_checking(self):
         savingFile = open(self.savingFileName, 'wb')
         print(self.savingFileName)
-        while self.processingFlag: # and self.all_queue_empty():
+        while self.processingFlag: # and not self.all_queue_empty():
             if not self.Decoded_Data.empty():
                 values = self.Decoded_Data.get()
-                # print(values)
-                self.NewData_Signal.emit(values)
+                print(values)
+                if self.decoder_type == 'STM':
+                    self.NewData_Signal.emit(values)
+                elif self.decoder_type == 'GPS':
+                    latitude_startIndex = values.find(",")
+                    latitude_endIndex = values.find(",", latitude_startIndex + 1)
+
+                    if (latitude_endIndex - latitude_startIndex) != 1:
+                        latitude = float(values[latitude_startIndex + 1: latitude_endIndex])
+
+                        longitude_startIndex = values.find(",", latitude_endIndex + 2)
+                        longitude_endIndex = values.find(",", longitude_startIndex + 1)
+
+                        longitude = float(values[longitude_startIndex + 1: longitude_endIndex])
+                        self.NewData_Signal.emit({"Latitude": latitude, "Longitude": longitude})
+
+                    else:
+                        # self.NewData_Signal.emit({"Latitude": 99.99, "Longitude": 99.99})
+                        self.NewData_Signal.emit({"Latitude": random(), "Longitude": random()})
 
             if not self.MessageQueue.empty():
                 self.printer.printing(text=str(self.MessageQueue.get()))
@@ -310,4 +413,4 @@ class COM_Port_GUI(QObject):
         savingFile.close()
 
     def all_queue_empty(self) -> bool:
-        return self.Duplicate_Queue.empty() and self.Decoded_Data.empty() and self.MessageQueue.empty()
+        return self.Duplicate_Queue.empty() or self.Decoded_Data.empty() or self.MessageQueue.empty()
