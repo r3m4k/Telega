@@ -3,6 +3,7 @@ import _io
 from time import sleep
 import binascii
 from random import random
+import traceback
 
 from threading import Thread
 from multiprocessing import Process, Queue
@@ -46,23 +47,18 @@ class COM_Port:
         # Откроем COM порт
         try:
             self.port = serial.Serial(port=com_port_name, baudrate=baudrate)
-        except serial.serialutil.SerialException as error:
-            msg_queue.put(f'Error__{error}')
+        except serial.serialutil.SerialException:
+            msg_queue.put(f'Warning__\n{traceback.format_exc()}')
+            msg_queue.put(f'Error__Ошибка открытия {com_port_name}')
             return
 
-        if not self.port.is_open:
-            try:
-                self.port.open()
-            except SerialException as error:
-                msg_queue.put(f'Error__{error}')
-
         # Начнём чтение данных
-        msg_queue.put(f'Начало чтения данных из {self.port.port}')
+        msg_queue.put(f'Info__Начало чтения данных из {self.port.port}')
         try:
             self.reading_ComPort(data_queue)
-        except SerialException as error:
-            msg_queue.put(f'Error__{error}')
-            msg_queue.put('Warning__Ошибка чтения порта')
+        except SerialException:
+            msg_queue.put(f'Warning__{traceback.format_exc()}')
+            msg_queue.put(f'Error__Ошибка чтения порта {self.port.port}')
 
     def reading_ComPort(self, data_queue: Queue):
         while True:
@@ -108,7 +104,11 @@ class Decoder:
 
             bt = source_queue.get()
             duplicate_queue.put(bt)
-            val = int(binascii.hexlify(bt), 16)
+            try:
+                val = int(binascii.hexlify(bt), 16)
+            except ValueError:
+                msg_queue.put(f'Warning__{traceback.format_exc()}')
+
             if stage == Want7E:
                 if val == 126:
                     stage = WantE7
@@ -165,7 +165,7 @@ class Decoder:
                     output_queue.put(data)
 
                 else:
-                    msg_queue.put('Контрольная сумма не сошлась')
+                    msg_queue.put('Warning__Контрольная сумма не сошлась')
                 stage = Want7E
 
     @staticmethod
@@ -258,7 +258,8 @@ class Decoder:
                 if Con_Sum == f'{con_sum:02X}':
                     output_queue.put(data)
                 else:
-                    msg_queue.put(f'{data}      '
+                    msg_queue.put(f'Warning__'
+                                  f'{data}      '
                                   f'Контрольная сумма не сошлась: {Con_Sum} | {con_sum:02X}')
                 stage = WantBegin
                 Con_Sum = ''
@@ -283,12 +284,14 @@ class COM_Port_GUI(QObject):
     """
     MyManager.register('ComPort', COM_Port, COM_PortProxy)
     MyManager.register('Decoder', Decoder, DecodeProxy)
-    NewData_Signal = pyqtSignal(dict)
 
-    def __init__(self, printer: Printing, decoder_type: str):
+    NewData_Signal = pyqtSignal(dict)
+    Error_ComPort = pyqtSignal(dict)
+
+    def __init__(self, printer: Printing, type_port: str):
         super().__init__()
         self.printer = printer              # Объект, с помощью которого будем выводить информацию в GUI, stdout и logger
-        self.decoder_type = decoder_type    # Тип подключённого датчика по данному порту: STM или GPS
+        self.type_port = type_port    # Тип подключённого датчика по данному порту: STM или GPS
         self.processingFlag = False         # Флаг необходимости анализировать данные. Равен True после self.startMeasuring
                                             # И равен False после self.stopMeasuring
         self.portName = ''                  # Имя COM порта
@@ -330,9 +333,9 @@ class COM_Port_GUI(QObject):
     def startMeasuring(self, com_port_name: str, saving_path: str, template_name: str, data_type: str):
         print(com_port_name)
         self.portName = com_port_name
-        self.savingFileName = f'{saving_path}/{template_name}_{self.decoder_type}_{data_type}.bin'
+        self.savingFileName = f'{saving_path}/{template_name}_{self.type_port}_{data_type}.bin'
         self.processingFlag = True
-        self.start_Processes()
+        self.__start_Processes()
 
     def stopMeasuring(self):
         self.printer.printing('Конец чтения данных')
@@ -340,14 +343,14 @@ class COM_Port_GUI(QObject):
 
     ##############################################
 
-    def start_Processes(self):
+    def __start_Processes(self):
         """
         Запуск процессов
         """
         # По новой инициализируем все процессы для корректного запуска при повторном вызове функции
-        self.ComPort_ReadingProcess = Process(target=self.ComPort.startMeasuring, args=(self.portName, BAUDRATE[self.decoder_type],self.ComPort_Data, self.MessageQueue, ), daemon=True)
-        self.ComPort_DecodingProcess = Process(target=self.Decoder.decoding, args=(self.decoder_type, self.ComPort_Data, self.Decoded_Data, self.Duplicate_Queue, self.MessageQueue, ), daemon=True)
-        self.Decoded_Data_Checking = Thread(target=self.queue_checking, args=(), daemon=True)
+        self.ComPort_ReadingProcess = Process(target=self.ComPort.startMeasuring, args=(self.portName, BAUDRATE[self.type_port], self.ComPort_Data, self.MessageQueue,), daemon=True)
+        self.ComPort_DecodingProcess = Process(target=self.Decoder.decoding, args=(self.type_port, self.ComPort_Data, self.Decoded_Data, self.Duplicate_Queue, self.MessageQueue,), daemon=True)
+        self.Decoded_Data_Checking = Thread(target=self.__queue_checking, args=(), daemon=True)
 
         self.ComPort_ReadingProcess.start()
 
@@ -378,39 +381,59 @@ class COM_Port_GUI(QObject):
         except RuntimeError:
             pass
 
-    def queue_checking(self):
+    def __queue_checking(self):
         savingFile = open(self.savingFileName, 'wb')
         print(self.savingFileName)
-        while self.processingFlag: # and not self.all_queue_empty():
+        while self.processingFlag or not self.__all_queue_empty():
             if not self.Decoded_Data.empty():
-                values = self.Decoded_Data.get()
-                print(values)
-                if self.decoder_type == 'STM':
-                    self.NewData_Signal.emit(values)
-                elif self.decoder_type == 'GPS':
-                    latitude_startIndex = values.find(",")
-                    latitude_endIndex = values.find(",", latitude_startIndex + 1)
-
-                    if (latitude_endIndex - latitude_startIndex) != 1:
-                        latitude = float(values[latitude_startIndex + 1: latitude_endIndex])
-
-                        longitude_startIndex = values.find(",", latitude_endIndex + 2)
-                        longitude_endIndex = values.find(",", longitude_startIndex + 1)
-
-                        longitude = float(values[longitude_startIndex + 1: longitude_endIndex])
-                        self.NewData_Signal.emit({"Latitude": latitude, "Longitude": longitude})
-
-                    else:
-                        # self.NewData_Signal.emit({"Latitude": 99.99, "Longitude": 99.99})
-                        self.NewData_Signal.emit({"Latitude": random(), "Longitude": random()})
+                self.__checking_DecodedData()
 
             if not self.MessageQueue.empty():
-                self.printer.printing(text=str(self.MessageQueue.get()))
+                self.__checking_MessageQueue()
 
             if not self.Duplicate_Queue.empty():
                 savingFile.write(self.Duplicate_Queue.get())
 
         savingFile.close()
 
-    def all_queue_empty(self) -> bool:
-        return self.Duplicate_Queue.empty() or self.Decoded_Data.empty() or self.MessageQueue.empty()
+    def __all_queue_empty(self) -> bool:
+        return self.Duplicate_Queue.empty() and self.Decoded_Data.empty() and self.MessageQueue.empty()
+
+    def __checking_DecodedData(self):
+        values = self.Decoded_Data.get()
+        # print(values)
+        if self.type_port == 'STM':
+            self.NewData_Signal.emit({"type_port": self.type_port, "values": values})
+        elif self.type_port == 'GPS':
+            latitude_startIndex = values.find(",")
+            latitude_endIndex = values.find(",", latitude_startIndex + 1)
+
+            if (latitude_endIndex - latitude_startIndex) != 1:
+                latitude = float(values[latitude_startIndex + 1: latitude_endIndex])
+
+                longitude_startIndex = values.find(",", latitude_endIndex + 2)
+                longitude_endIndex = values.find(",", longitude_startIndex + 1)
+
+                longitude = float(values[longitude_startIndex + 1: longitude_endIndex])
+                self.NewData_Signal.emit({"type_port": self.type_port, "values": {"Latitude": latitude, "Longitude": longitude}})
+
+            else:
+                self.NewData_Signal.emit({"type_port": self.type_port, "values": {"Latitude": 99.99, "Longitude": 99.99}})
+
+    def __checking_MessageQueue(self):
+        msg = str(self.MessageQueue.get())
+        msg_type = msg.split('__')[0]
+        msg_text = msg.split('__')[1]
+
+        if msg_type == 'Error':
+            self.Error_ComPort.emit({"type_port": self.type_port, "message": msg_text})
+
+        match msg_type:
+            case 'Info':
+                self.printer.printing(text=msg_text, log_text=msg_text, log_level=msg_type)
+            case 'Warning':
+                self.printer.printing(log_text=f'\n{msg_text}', log_level=msg_type)
+            case 'Error':
+                self.printer.printing(text=f'Внимание!!! {msg_text}', log_text=msg_text, log_level=msg_type)
+            case _:
+                pass
