@@ -65,6 +65,7 @@ class DataCollectingWindow(QMainWindow):
 
         self.PassageNum = 1                 # Номер проезда
         self.UsingGpsFlag: bool = True      # Флаг использования GPS модуля
+        self.LoggerReady: bool = False      # Флаг законченной настройки логгера в self.printer
 
         # Загрузим данные с прошлого использования
         with open(JSON_FILE, 'r') as json_file:
@@ -103,8 +104,12 @@ class DataCollectingWindow(QMainWindow):
 
         # Подключим сигналы
         self.printer.NewText_Signal.connect(lambda text: self.display(text))
+
         self.STM_ComPort.NewData_Signal.connect(lambda values: self.update_Data(values))
         self.GPS_ComPort.NewData_Signal.connect(lambda values: self.update_Data(values))
+
+        self.STM_ComPort.Error_ComPort.connect(lambda error: self.error_handler(error))
+        self.GPS_ComPort.Error_ComPort.connect(lambda error: self.error_handler(error))
 
     def init_UI(self):
         self.init_Buttons()
@@ -128,17 +133,25 @@ class DataCollectingWindow(QMainWindow):
 
         event.accept()
 
+    def update_logger(self):
+        if not self.LoggerReady:
+            self.printer.set_logger(f'{self.Saving_Params[Dir][LineEdit].text()}/{self.Saving_Params[FileName][LineEdit].text()}_logger.log')
+            self.LoggerReady = True
+
     def display(self, text):
         """
         Выводит text в msgList ("терминал")
         """
         self.ui.msgList.addItem(text)
 
-    def update_Data(self, values: dir):
-        if 'Latitude' in list(values.keys()):
-            self.update_GPSData(values)
-        elif 'Acc_X' in list(values.keys()):
-            self.update_STMData(values)
+    def update_Data(self, data: dir):
+        match data["type_port"]:
+            case "STM":
+                self.update_STMData(data["values"])
+            case "GPS":
+                self.update_GPSData(data["values"])
+            case _:
+                pass
 
     def update_STMData(self, values: dir):
         self.update_Plots(values)
@@ -194,6 +207,13 @@ class DataCollectingWindow(QMainWindow):
 
         self.GPS_CheckBox.setEnabled(True)
 
+    def error_handler(self, error: dir):
+        match error["type_port"]:
+            case "STM":
+                self.STM_ComPort.stop_Processes()
+                self.unblockInputs()
+                message(text=error["message"], icon='Critical')
+
     ####### Функционал для self.Command_Buttons #######
     def init_Buttons(self):
         self.Command_Buttons[Start_InitialSetting].clicked.connect(self.start_InitialSetting)
@@ -208,6 +228,7 @@ class DataCollectingWindow(QMainWindow):
         print('+++')
 
     def start_Measuring(self):
+        self.update_logger()
         self.PassageNum_Widget.setText(f'№ {self.PassageNum}')
 
         # Сбросим накопленные данные
@@ -225,11 +246,12 @@ class DataCollectingWindow(QMainWindow):
                 return
         else:
             self.printer.printing(text='GPS модуль не подключён!')
+            self.GPS_Settings[List].setCurrentIndex(self.STM_Settings[List].findText('-----'))
+            self.UsingGpsFlag = False
 
         self.blockInputs()
 
         self.Command_Buttons[Stop_Measuring].setEnabled(True)
-        self.Command_Buttons[Stop_ReadingData].setEnabled(True)
 
         self.STM_ComPort.startMeasuring(
             com_port_name=self.STM_Settings[List].currentText(),
@@ -238,13 +260,13 @@ class DataCollectingWindow(QMainWindow):
             data_type=f'RawData_{self.PassageNum}'
         )
 
-        self.GPS_ComPort.startMeasuring(
-            com_port_name=self.GPS_Settings[List].currentText(),
-            saving_path=self.Saving_Params[Dir][LineEdit].text(),
-            template_name=self.Saving_Params[FileName][LineEdit].text(),
-            data_type='RawData'
-        )
-
+        if self.UsingGpsFlag:
+            self.GPS_ComPort.startMeasuring(
+                com_port_name=self.GPS_Settings[List].currentText(),
+                saving_path=self.Saving_Params[Dir][LineEdit].text(),
+                template_name=self.Saving_Params[FileName][LineEdit].text(),
+                data_type='RawData'
+            )
 
     def stop_Measuring(self):
         self.unblockInputs()
@@ -255,6 +277,7 @@ class DataCollectingWindow(QMainWindow):
         self.STM_ComPort.stopMeasuring()
         self.GPS_ComPort.stopMeasuring()
         self.PassageNum += 1
+        self.Command_Buttons[Stop_Measuring].setEnabled(False)
 
     def stop_ReadingData(self):
         print('===')
@@ -343,6 +366,11 @@ class DataCollectingWindow(QMainWindow):
         com_ports = self.STM_ComPort.get_ComPorts()
         self.STM_Settings[List].clear()
         self.STM_Settings[List].addItems(com_ports)
+
+        # Зададим значение по умолчанию, если в дескрипторе есть 'STM'
+        for port in com_ports.keys():
+            if 'STM' in com_ports[port]['desc']:
+                self.STM_Settings[List].setCurrentIndex(list(com_ports.keys()).index(port))
 
     ####### Функционал для self.GPS_Settings #######
     def init_GPS_Settings(self):
