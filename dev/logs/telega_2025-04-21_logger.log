@@ -1,18 +1,6 @@
-2025-04-21 15:07:53,149 INFO: Начало чтения данных из COM12
-2025-04-21 15:08:07,158 WARNING: 
+2025-04-21 17:10:44,374 CRITICAL: 
+could not open port 'COM12': FileNotFoundError(2, 'Не удается найти указанный файл.', None, 2)
 Traceback (most recent call last):
-  File "D:\Job\Telega\dev\com_port.py", line 108, in decoding_STM
-    val = int(binascii.hexlify(bt), 16)
-ValueError: invalid literal for int() with base 16: b''
-
-2025-04-21 15:08:07,159 WARNING: 
-Traceback (most recent call last):
-  File "D:\Job\Telega\dev\com_port.py", line 58, in startMeasuring
-    self.reading_ComPort(data_queue)
-  File "D:\Job\Telega\dev\com_port.py", line 65, in reading_ComPort
-    data_queue.put(self.port.read(1))
-  File "C:\Users\roman\AppData\Local\Programs\Python\Python310\lib\site-packages\serial\serialwin32.py", line 275, in read
-    raise SerialException("ClearCommError failed ({!r})".format(ctypes.WinError()))
-serial.serialutil.SerialException: ClearCommError failed (PermissionError(13, 'Устройство не опознает команду.', None, 22))
-
-2025-04-21 15:08:07,161 ERROR: Ошибка чтения порта COM12
+  File "D:\Job\Telega\dev\com_port.py", line 51, in startMeasuring
+    self.port = serial.Serial(port=com_port_name, baudrate=baudrate)
+  File "C:\Users\roman\AppData\Local\Programs\Python\Python310\lib\site-packages\serial\serialwin32.py", line 33, in 

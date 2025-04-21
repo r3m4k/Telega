@@ -13,7 +13,7 @@ class Printing(QObject):
         self.logFilePath = logFilePath
         self.logger.setLevel(logging.INFO)
         formatter = logging.Formatter('%(asctime)s %(levelname)s: %(message)s')
-        file_handler = logging.FileHandler(self.logFilePath, mode='w', encoding='UTF-8, ')
+        file_handler = logging.FileHandler(self.logFilePath, mode='w', encoding='UTF-8')
         file_handler.setFormatter(formatter)
         self.logger.addHandler(file_handler)
 
@@ -38,5 +38,7 @@ class Printing(QObject):
                 self.logger.warning(log_text)
             case 'Error':
                 self.logger.error(log_text)
+            case 'Critical':
+                self.logger.critical(log_text)
             case _:
                 pass

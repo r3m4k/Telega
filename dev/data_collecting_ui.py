@@ -210,7 +210,11 @@ class DataCollectingWindow(QMainWindow):
     def error_handler(self, error: dir):
         match error["type_port"]:
             case "STM":
-                self.STM_ComPort.stop_Processes()
+                self.STM_ComPort.stopMeasuring()
+                self.unblockInputs()
+                message(text=error["message"], icon='Critical')
+            case "GPS":
+                self.GPS_ComPort.stopMeasuring()
                 self.unblockInputs()
                 message(text=error["message"], icon='Critical')
 
