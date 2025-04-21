@@ -59,7 +59,6 @@ class MainWindow(QMainWindow):
         event.accept()
 
 if __name__ == "__main__":
-    freeze_support()    # Для корректной работы межпроцессорного взаимодействия
     app = QApplication(argv)
     window = MainWindow()
     window.show()

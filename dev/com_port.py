@@ -1,5 +1,6 @@
 import os
 import _io
+import sys
 from time import sleep
 import binascii
 from random import random
@@ -44,21 +45,26 @@ class COM_Port:
         self.port.close()
 
     def startMeasuring(self, com_port_name: str, baudrate: int, data_queue: Queue, msg_queue: Queue):
-        # Откроем COM порт
+        # При возникновении любого неучтённого исключения перенаправим его в stderr родительского процесса с помощью msg_queue
         try:
-            self.port = serial.Serial(port=com_port_name, baudrate=baudrate)
-        except serial.serialutil.SerialException:
-            msg_queue.put(f'Warning__\n{traceback.format_exc()}')
-            msg_queue.put(f'Error__Ошибка открытия {com_port_name}')
-            return
+            # Откроем COM порт
+            try:
+                self.port = serial.Serial(port=com_port_name, baudrate=baudrate)
+            except serial.serialutil.SerialException:
+                msg_queue.put(f'Warning__\n{traceback.format_exc()}')
+                msg_queue.put(f'Error__Ошибка открытия {com_port_name}')
+                return
 
-        # Начнём чтение данных
-        msg_queue.put(f'Info__Начало чтения данных из {self.port.port}')
-        try:
-            self.reading_ComPort(data_queue)
-        except SerialException:
-            msg_queue.put(f'Warning__{traceback.format_exc()}')
-            msg_queue.put(f'Error__Ошибка чтения порта {self.port.port}')
+            # Начнём чтение данных
+            msg_queue.put(f'Info__Начало чтения данных из {self.port.port}')
+            try:
+                self.reading_ComPort(data_queue)
+            except SerialException:
+                msg_queue.put(f'Warning__{traceback.format_exc()}')
+                msg_queue.put(f'Error__Ошибка чтения порта {self.port.port}')
+
+        except Exception as error:
+            msg_queue.put(f'Critical__\n{error}\n{traceback.format_exc()}')
 
     def reading_ComPort(self, data_queue: Queue):
         while True:
@@ -70,13 +76,16 @@ class Decoder:
         pass
 
     def decoding(self, type_name: str, source_queue: Queue, output_queue: Queue, duplicate_queue: Queue, msg_queue: Queue):
-        if type_name == "STM":
-            self.decoding_STM(source_queue, output_queue, duplicate_queue, msg_queue)
-        elif type_name == "GPS":
-            self.decoding_GPS(source_queue, output_queue, duplicate_queue, msg_queue)
-        else:
-            raise RuntimeError('Неправильно передан параметр type_name.\n'
-                               f'Он может принимать значения "STM" или "GPS", а передан type_name = {type_name}')
+        try:
+            if type_name == "STM":
+                self.decoding_STM(source_queue, output_queue, duplicate_queue, msg_queue)
+            elif type_name == "GPS":
+                self.decoding_GPS(source_queue, output_queue, duplicate_queue, msg_queue)
+            else:
+                raise RuntimeError('Неправильно передан параметр type_name.\n'
+                                   f'Он может принимать значения "STM" или "GPS", а передан type_name = {type_name}')
+        except Exception as error:
+            msg_queue.put(f'Critical__type_name = {type_name}\n{error}\n{traceback.format_exc()}')
 
     def decoding_STM(self, source_queue: Queue, output_queue: Queue, duplicate_queue: Queue, msg_queue: Queue):
         # Создадим список именованных констант, которые будут использоваться вместо Enum
@@ -331,7 +340,6 @@ class COM_Port_GUI(QObject):
     ##### Методы, напрямую вызываемые из GUI #####
 
     def startMeasuring(self, com_port_name: str, saving_path: str, template_name: str, data_type: str):
-        print(com_port_name)
         self.portName = com_port_name
         self.savingFileName = f'{saving_path}/{template_name}_{self.type_port}_{data_type}.bin'
         self.processingFlag = True
@@ -339,7 +347,7 @@ class COM_Port_GUI(QObject):
 
     def stopMeasuring(self):
         self.printer.printing('Конец чтения данных')
-        self.stop_Processes()
+        self.__stop_Processes()
 
     ##############################################
 
@@ -359,7 +367,7 @@ class COM_Port_GUI(QObject):
         self.ComPort_DecodingProcess.start()
         self.Decoded_Data_Checking.start()
 
-    def stop_Processes(self):
+    def __stop_Processes(self):
         self.processingFlag = False
 
         # Если попытаться закрыть процесс, который уже был закрыт, то поймаем исключение AttributeError
@@ -428,6 +436,9 @@ class COM_Port_GUI(QObject):
         if msg_type == 'Error':
             self.Error_ComPort.emit({"type_port": self.type_port, "message": msg_text})
 
+        elif msg_type == 'Critical':
+            self.Error_ComPort.emit({"type_port": self.type_port, "message": '!!! Критическая ошибка. Проверьте log файл !!!'})
+
         match msg_type:
             case 'Info':
                 self.printer.printing(text=msg_text, log_text=msg_text, log_level=msg_type)
@@ -435,5 +446,7 @@ class COM_Port_GUI(QObject):
                 self.printer.printing(log_text=f'\n{msg_text}', log_level=msg_type)
             case 'Error':
                 self.printer.printing(text=f'Внимание!!! {msg_text}', log_text=msg_text, log_level=msg_type)
+            case 'Critical':
+                self.printer.printing(text='!!! Критическая ошибка. Проверьте log файл !!!', log_text=msg_text, log_level=msg_type)
             case _:
                 pass

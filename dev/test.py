@@ -1,3 +1,23 @@
+import sys
+from test2 import test
+
+# Open file for writing
+f = open("output.txt", "w")
+
+# Redirect stdout and stderr to file
+sys.stdout = f
+sys.stderr = f
+
+test()
+
+# Close file
+f.close()
+
+
+
+
+
+"""
 from multiprocessing import Process, Queue
 from multiprocessing.managers import NamespaceProxy, BaseManager
 
@@ -64,6 +84,8 @@ class Foo:
 
         self.p2.terminate()
         self.p2.join()
+        
+"""
 
 
 """
