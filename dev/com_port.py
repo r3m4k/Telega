@@ -37,7 +37,7 @@ class MyManager(BaseManager):
     pass
 
 
-class COM_Port(Process):
+class COM_Port:
     # Формат команд: 2 байта - заголовок, 1 байт - формат посылки, 2 байта - команда, 1 байт - контрольная сумма
     commands = {
         "start_InitialSetting":    bytes([0x7e, 0xe7, 0xff, 0xab, 0xba, 0xc9]),
@@ -49,64 +49,53 @@ class COM_Port(Process):
     def __init__(self):
         super().__init__()
         self.port = serial.Serial()         # COM порт, с которым ведётся работа в данном модуле
-        self.data_queue = Queue()           # Очередь, куда будут сохраняться данные из COM порта
-        self.msg_queue = Queue()            # Очередь сообщений
-
 
     def __del__(self):
         self.port.close()
 
-    def terminate(self, command=''):
-        if command != '':
-            self.send_Command(command)
-        super().terminate()
-
     def startMeasuring(self, com_port_name: str, baudrate: int, data_queue: Queue, msg_queue: Queue, command = ''):
-        self.data_queue = data_queue
-        self.msg_queue = msg_queue
-
         # При возникновении любого неучтённого исключения перенаправим его в self.msg_queue
         try:
             # Откроем COM порт
             try:
                 self.port = serial.Serial(port=com_port_name, baudrate=baudrate, timeout=1)
             except serial.serialutil.SerialException:
-                self.msg_queue.put(f'Warning__\n{traceback.format_exc()}')
-                self.msg_queue.put(f'Error__Ошибка открытия {com_port_name}')
+                msg_queue.put(f'Warning__\n{traceback.format_exc()}')
+                msg_queue.put(f'Error__Ошибка открытия {com_port_name}')
                 return
 
             try:
                 if command != '':
                     # Отправим команду по COM порту
-                    self.send_Command(command)
+                    self.send_Command(command, msg_queue)
 
             except serial.serialutil.SerialException:
-                self.msg_queue.put(f'Warning__\n{traceback.format_exc()}')
-                self.msg_queue.put(f'Error__Ошибка отправки команды по {com_port_name}')
+                msg_queue.put(f'Warning__\n{traceback.format_exc()}')
+                msg_queue.put(f'Error__Ошибка отправки команды по {com_port_name}')
                 return
 
             # Начнём чтение данных
-            self.msg_queue.put(f'Info__Начало чтения данных из {self.port.port}')
+            msg_queue.put(f'Info__Начало чтения данных из {self.port.port}')
             try:
-                self.reading_ComPort()
+                self.reading_ComPort(data_queue)
             except SerialException:
-                self.msg_queue.put(f'Warning__{traceback.format_exc()}')
-                self.msg_queue.put(f'Error__Ошибка чтения порта {self.port.port}')
+                msg_queue.put(f'Warning__{traceback.format_exc()}')
+                msg_queue.put(f'Error__Ошибка чтения порта {self.port.port}')
 
         except Exception as error:
-            self.msg_queue.put(f'Critical__\n{error}\n{traceback.format_exc()}')
+            msg_queue.put(f'Critical__\n{error}\n{traceback.format_exc()}')
 
-    def reading_ComPort(self):
+    def reading_ComPort(self, data_queue):
         while True:
-            self.data_queue.put(self.port.read(1))
+            data_queue.put(self.port.read(1))
 
-    def send_Command(self, command: str):
-        self.msg_queue.put(f'Info__Отправка команды {command} / {self.commands[command]} / по COM порту')
+    def send_Command(self, command: str, msg_queue):
+        msg_queue.put(f'Info__Отправка команды {command} / {self.commands[command]} / по COM порту')
         try:
             self.port.write(self.commands[command])
         except Exception:
-            self.msg_queue.put(f'Warning__{traceback.format_exc()}')
-            self.msg_queue.put(f'Error__Ошибка отправки команды по {self.port.port}')
+            msg_queue.put(f'Warning__{traceback.format_exc()}')
+            msg_queue.put(f'Error__Ошибка отправки команды по {self.port.port}')
             return
 
 class Decoder:
