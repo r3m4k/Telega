@@ -1,6 +1,0 @@
-2025-04-21 17:10:44,374 CRITICAL: 
-could not open port 'COM12': FileNotFoundError(2, 'Не удается найти указанный файл.', None, 2)
-Traceback (most recent call last):
-  File "D:\Job\Telega\dev\com_port.py", line 51, in startMeasuring
-    self.port = serial.Serial(port=com_port_name, baudrate=baudrate)
-  File "C:\Users\roman\AppData\Local\Programs\Python\Python310\lib\site-packages\serial\serialwin32.py", line 33, in 

@@ -37,39 +37,77 @@ class MyManager(BaseManager):
     pass
 
 
-class COM_Port:
+class COM_Port(Process):
+    # Формат команд: 2 байта - заголовок, 1 байт - формат посылки, 2 байта - команда, 1 байт - контрольная сумма
+    commands = {
+        "start_InitialSetting":    bytes([0x7e, 0xe7, 0xff, 0xab, 0xba, 0xc9]),
+        "start_Measuring":         bytes([0x7e, 0xe7, 0xff, 0xbc, 0xcb, 0xeb]),
+        "stop_Measuring":          bytes([0x7e, 0xe7, 0xff, 0xcd, 0xdc, 0x0d]),
+        "stop_CollectingData":     bytes([0x7e, 0xe7, 0xff, 0xde, 0xed, 0x2f])
+    }
+
     def __init__(self):
+        super().__init__()
         self.port = serial.Serial()         # COM порт, с которым ведётся работа в данном модуле
+        self.data_queue = Queue()           # Очередь, куда будут сохраняться данные из COM порта
+        self.msg_queue = Queue()            # Очередь сообщений
+
 
     def __del__(self):
         self.port.close()
 
-    def startMeasuring(self, com_port_name: str, baudrate: int, data_queue: Queue, msg_queue: Queue):
-        # При возникновении любого неучтённого исключения перенаправим его в stderr родительского процесса с помощью msg_queue
+    def terminate(self, command=''):
+        if command != '':
+            self.send_Command(command)
+        super().terminate()
+
+    def startMeasuring(self, com_port_name: str, baudrate: int, data_queue: Queue, msg_queue: Queue, command = ''):
+        self.data_queue = data_queue
+        self.msg_queue = msg_queue
+
+        # При возникновении любого неучтённого исключения перенаправим его в self.msg_queue
         try:
             # Откроем COM порт
             try:
-                self.port = serial.Serial(port=com_port_name, baudrate=baudrate)
+                self.port = serial.Serial(port=com_port_name, baudrate=baudrate, timeout=1)
             except serial.serialutil.SerialException:
-                msg_queue.put(f'Warning__\n{traceback.format_exc()}')
-                msg_queue.put(f'Error__Ошибка открытия {com_port_name}')
+                self.msg_queue.put(f'Warning__\n{traceback.format_exc()}')
+                self.msg_queue.put(f'Error__Ошибка открытия {com_port_name}')
+                return
+
+            try:
+                if command != '':
+                    # Отправим команду по COM порту
+                    self.send_Command(command)
+
+            except serial.serialutil.SerialException:
+                self.msg_queue.put(f'Warning__\n{traceback.format_exc()}')
+                self.msg_queue.put(f'Error__Ошибка отправки команды по {com_port_name}')
                 return
 
             # Начнём чтение данных
-            msg_queue.put(f'Info__Начало чтения данных из {self.port.port}')
+            self.msg_queue.put(f'Info__Начало чтения данных из {self.port.port}')
             try:
-                self.reading_ComPort(data_queue)
+                self.reading_ComPort()
             except SerialException:
-                msg_queue.put(f'Warning__{traceback.format_exc()}')
-                msg_queue.put(f'Error__Ошибка чтения порта {self.port.port}')
+                self.msg_queue.put(f'Warning__{traceback.format_exc()}')
+                self.msg_queue.put(f'Error__Ошибка чтения порта {self.port.port}')
 
         except Exception as error:
-            msg_queue.put(f'Critical__\n{error}\n{traceback.format_exc()}')
+            self.msg_queue.put(f'Critical__\n{error}\n{traceback.format_exc()}')
 
-    def reading_ComPort(self, data_queue: Queue):
+    def reading_ComPort(self):
         while True:
-            data_queue.put(self.port.read(1))
+            self.data_queue.put(self.port.read(1))
 
+    def send_Command(self, command: str):
+        self.msg_queue.put(f'Info__Отправка команды {command} / {self.commands[command]} / по COM порту')
+        try:
+            self.port.write(self.commands[command])
+        except Exception:
+            self.msg_queue.put(f'Warning__{traceback.format_exc()}')
+            self.msg_queue.put(f'Error__Ошибка отправки команды по {self.port.port}')
+            return
 
 class Decoder:
     def __init__(self):
@@ -117,6 +155,7 @@ class Decoder:
                 val = int(binascii.hexlify(bt), 16)
             except ValueError:
                 msg_queue.put(f'Warning__{traceback.format_exc()}')
+                continue
 
             if stage == Want7E:
                 if val == 126:
@@ -326,7 +365,7 @@ class COM_Port_GUI(QObject):
         self.Decoded_Data_Checking = Thread()
 
     def __del__(self):
-        self.stop_Processes()
+        self.__stop_Processes()
 
     @staticmethod
     def get_ComPorts() -> dir:
@@ -343,7 +382,7 @@ class COM_Port_GUI(QObject):
         self.portName = com_port_name
         self.savingFileName = f'{saving_path}/{template_name}_{self.type_port}_{data_type}.bin'
         self.processingFlag = True
-        self.__start_Processes()
+        self.__start_Processes('start_Measuring')
 
     def stopMeasuring(self):
         self.printer.printing('Конец чтения данных')
@@ -351,12 +390,12 @@ class COM_Port_GUI(QObject):
 
     ##############################################
 
-    def __start_Processes(self):
+    def __start_Processes(self, command=''):
         """
         Запуск процессов
         """
         # По новой инициализируем все процессы для корректного запуска при повторном вызове функции
-        self.ComPort_ReadingProcess = Process(target=self.ComPort.startMeasuring, args=(self.portName, BAUDRATE[self.type_port], self.ComPort_Data, self.MessageQueue,), daemon=True)
+        self.ComPort_ReadingProcess = Process(target=self.ComPort.startMeasuring, args=(self.portName, BAUDRATE[self.type_port], self.ComPort_Data, self.MessageQueue, command, ), daemon=True)
         self.ComPort_DecodingProcess = Process(target=self.Decoder.decoding, args=(self.type_port, self.ComPort_Data, self.Decoded_Data, self.Duplicate_Queue, self.MessageQueue,), daemon=True)
         self.Decoded_Data_Checking = Thread(target=self.__queue_checking, args=(), daemon=True)
 
@@ -367,6 +406,8 @@ class COM_Port_GUI(QObject):
         self.ComPort_DecodingProcess.start()
         self.Decoded_Data_Checking.start()
 
+        # self.MessageQueue.put('Info__Можно начинать измерения')
+
     def __stop_Processes(self):
         self.processingFlag = False
 
@@ -374,7 +415,7 @@ class COM_Port_GUI(QObject):
         try:
             self.ComPort_ReadingProcess.terminate()
             self.ComPort_ReadingProcess.join()
-            sleep(0.5)    # Для гарантии завершения обработки self.ComPort_Data
+            sleep(0.5)    # Для гарантии завершения обработки данных из очереди self.ComPort_Data
         except AttributeError:
             pass
 
@@ -388,6 +429,8 @@ class COM_Port_GUI(QObject):
             self.Decoded_Data_Checking.join()
         except RuntimeError:
             pass
+
+    ##############################################
 
     def __queue_checking(self):
         savingFile = open(self.savingFileName, 'wb')
