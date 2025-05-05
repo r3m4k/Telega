@@ -46,6 +46,10 @@ class COM_Port:
         "stop_CollectingData":     bytes([0x7e, 0xe7, 0xff, 0xde, 0xed, 0x2f])
     }
 
+    received_msg = {
+        "confirmation_Message":    bytes([0x7e, 0xe7, 0xff, 0xaa, 0xaa, 0xb8, 0, 0])
+    }
+
     def __init__(self):
         self.port = serial.Serial()         # COM порт, с которым ведётся работа в данном модуле
 
@@ -112,7 +116,13 @@ class COM_Port:
     def send_Command(self, command: str, msg_queue):
         msg_queue.put(f'Info__Отправка команды {command} по {self.port.port}')
         try:
+            self.port.reset_input_buffer()
             self.port.write(self.commands[command])
+            msg = self.port.read(size=len(self.received_msg['confirmation_Message']))
+            if msg == self.received_msg['confirmation_Message']:
+                msg_queue.put('Info__Команда успешно принята устройством')
+            else:
+                msg_queue.put(f'Warning__Ошибка чтения команды устройством\n{msg}')
         except Exception:
             msg_queue.put(f'Warning__{traceback.format_exc()}')
             msg_queue.put(f'Error__Ошибка отправки команды по {self.port.port}')
@@ -380,6 +390,7 @@ class COM_Port_GUI(QObject):
 
     def __del__(self):
         self.__stop_Processes()
+        self.gui_connection.close()
 
     ##### Методы, напрямую вызываемые из GUI #####
     @staticmethod
@@ -435,7 +446,6 @@ class COM_Port_GUI(QObject):
                 if self.type_port == 'STM':
                     self.gui_connection.send('Command__stop_Measuring')
                     sleep(0.5)  # Для корректного завершения процесса
-                    self.gui_connection.close()
 
                 self.ComPort_ReadingProcess.terminate()
                 self.ComPort_ReadingProcess.join()
