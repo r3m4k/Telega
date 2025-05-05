@@ -1,2 +1,5 @@
 .idea
-dev/logs/
+./dev/logs
+*.log
+*.bin
+*.pyc
