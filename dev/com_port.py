@@ -7,7 +7,7 @@ from random import random
 import traceback
 
 from threading import Thread
-from multiprocessing import Process, Queue
+from multiprocessing import Process, Queue, Pipe
 from multiprocessing.managers import BaseManager, NamespaceProxy
 from multiprocessing.context import ProcessError
 
@@ -53,7 +53,7 @@ class COM_Port:
         self.port.close()
 
     def startMeasuring(self, com_port_name: str, baudrate: int,
-                       data_queue: Queue, command_queue: Queue, msg_queue: Queue,
+                       data_queue: Queue, command_pipe: Pipe, msg_queue: Queue,
                        command = ''):
 
         # При возникновении любого неучтённого исключения перенаправим его в self.msg_queue
@@ -79,7 +79,7 @@ class COM_Port:
             # Начнём чтение данных
             msg_queue.put(f'Info__Начало чтения данных из {self.port.port}')
             try:
-                self.reading_ComPort(data_queue, command_queue, msg_queue)
+                self.reading_ComPort(data_queue, command_pipe, msg_queue)
             except SerialException:
                 msg_queue.put(f'Warning__{traceback.format_exc()}')
                 msg_queue.put(f'Error__Ошибка чтения порта {self.port.port}')
@@ -87,17 +87,18 @@ class COM_Port:
         except Exception as error:
             msg_queue.put(f'Critical__\n{error}\n{traceback.format_exc()}')
 
-    def reading_ComPort(self, data_queue: Queue, command_queue: Queue, msg_queue: Queue):
+    def reading_ComPort(self, data_queue: Queue, command_pipe: Pipe, msg_queue: Queue):
         while True:
-            if command_queue.empty():
+            if not command_pipe.poll():
                 # Если нет поступивших команд, то читаем данные из СOM порта
                 data_queue.put(self.port.read(1))
             else:
-                receive_command = command_queue.get()
+                receive_command = command_pipe.recv()
                 msg_queue.put(f'Info__Новая команда {receive_command}')
 
                 self.decode_Command(str(receive_command), msg_queue)
                 break   # Остановим чтение из com порта
+
 
     def decode_Command(self, command: str, msg_queue: Queue):
         try:
@@ -119,6 +120,7 @@ class COM_Port:
             msg_queue.put(f'Warning__{traceback.format_exc()}')
             msg_queue.put(f'Error__Ошибка отправки команды по {self.port.port}')
             return
+
 
 class Decoder:
     def __init__(self):
@@ -368,7 +370,9 @@ class COM_Port_GUI(QObject):
         self.Decoded_Data = Queue()     # Очередь, куда будет записываться декодированные данные из ComPort_Data
         self.Duplicate_Queue= Queue()   # Очередь, куда будет дублироваться данные из self.ComPort_Data для записи данных в log файл
         self.MessageQueue = Queue()     # Очередь сообщений, полученных из различных процессов
-        self.CommandQueue = Queue()     # Очередь сообщений, которые будем отправлять в дочерние процессы
+
+        # Создадим односторонний канал связи между процессами
+        self.hardware_connection, self.gui_connection = Pipe(duplex=False)
 
         self.ComPort = self.manager.ComPort()
         self.Decoder = self.manager.Decoder()
@@ -397,8 +401,8 @@ class COM_Port_GUI(QObject):
         self.__start_Processes('Command__start_Measuring')
 
     def stopMeasuring(self):
-        self.printer.printing('Конец чтения данных')
         self.__stop_Processes()
+        self.printer.printing('Конец чтения данных')
 
     ##############################################
 
@@ -412,7 +416,7 @@ class COM_Port_GUI(QObject):
             self.isProcessesActive = True
 
             # По новой инициализируем все процессы для корректного запуска при повторном вызове функции
-            self.ComPort_ReadingProcess = Process(target=self.ComPort.startMeasuring, args=(self.portName, BAUDRATE[self.type_port], self.ComPort_Data, self.CommandQueue, self.MessageQueue, command, ), daemon=True)
+            self.ComPort_ReadingProcess = Process(target=self.ComPort.startMeasuring, args=(self.portName, BAUDRATE[self.type_port], self.ComPort_Data, self.hardware_connection, self.MessageQueue, command, ), daemon=True)
             self.ComPort_DecodingProcess = Process(target=self.Decoder.decoding, args=(self.type_port, self.ComPort_Data, self.Decoded_Data, self.Duplicate_Queue, self.MessageQueue,), daemon=True)
             self.Decoded_Data_Checking = Thread(target=self.__queue_checking, args=(), daemon=True)
 
@@ -427,15 +431,14 @@ class COM_Port_GUI(QObject):
         """
         Остановка процессов
         """
-        self.processingFlag = False
-
         if self.isProcessesActive:
             # Если процессы активны
             self.isProcessesActive = False
             try:
                 if self.type_port == 'STM':
-                    self.CommandQueue.put('Command__stop_Measuring')
-                    sleep(1)  # Для корректного завершения процесса
+                    self.gui_connection.send('Command__stop_Measuring')
+                    sleep(0.5)  # Для корректного завершения процесса
+                    self.gui_connection.close()
 
                 self.ComPort_ReadingProcess.terminate()
                 self.ComPort_ReadingProcess.join()
@@ -444,7 +447,9 @@ class COM_Port_GUI(QObject):
                 self.ComPort_DecodingProcess.terminate()
                 self.ComPort_DecodingProcess.join()
 
+                self.processingFlag = False
                 self.Decoded_Data_Checking.join()
+
 
             except Exception as error:
                 self.MessageQueue.put(f'Critical__\n{error}\n{traceback.format_exc()}')
