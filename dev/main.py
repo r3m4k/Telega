@@ -59,6 +59,7 @@ class MainWindow(QMainWindow):
         event.accept()
 
 if __name__ == "__main__":
+    freeze_support()
     app = QApplication(argv)
     window = MainWindow()
     window.show()

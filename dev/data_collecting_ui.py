@@ -64,7 +64,7 @@ class DataCollectingWindow(QMainWindow):
         self.setWindowIcon(QIcon('../ui/Telega.ico'))
 
         self.PassageNum = 1                 # Номер проезда
-        self.UsingGpsFlag: bool = True      # Флаг использования GPS модуля
+        self.UsingGps_Flag: bool = True      # Флаг использования GPS модуля
         self.LoggerReady: bool = False      # Флаг законченной настройки логгера в self.printer
 
         # Загрузим данные с прошлого использования
@@ -251,7 +251,7 @@ class DataCollectingWindow(QMainWindow):
         else:
             self.printer.printing(text='GPS модуль не подключён!')
             self.GPS_Settings[List].setCurrentIndex(self.STM_Settings[List].findText('-----'))
-            self.UsingGpsFlag = False
+            self.UsingGps_Flag = False
 
         self.blockInputs()
 
@@ -264,7 +264,7 @@ class DataCollectingWindow(QMainWindow):
             data_type=f'RawData_{self.PassageNum}'
         )
 
-        if self.UsingGpsFlag:
+        if self.UsingGps_Flag:
             self.GPS_ComPort.startMeasuring(
                 com_port_name=self.GPS_Settings[List].currentText(),
                 saving_path=self.Saving_Params[Dir][LineEdit].text(),
@@ -279,7 +279,9 @@ class DataCollectingWindow(QMainWindow):
         self.Command_Buttons[Stop_ReadingData].setEnabled(True)
 
         self.STM_ComPort.stopMeasuring()
-        self.GPS_ComPort.stopMeasuring()
+        if self.UsingGps_Flag:
+            self.GPS_ComPort.stopMeasuring()
+
         self.PassageNum += 1
         self.Command_Buttons[Stop_Measuring].setEnabled(False)
 
