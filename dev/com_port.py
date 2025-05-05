@@ -93,10 +93,7 @@ class COM_Port:
                 # Если нет поступивших команд, то читаем данные из СOM порта
                 data_queue.put(self.port.read(1))
             else:
-                receive_command = command_pipe.recv()
-                msg_queue.put(f'Info__Новая команда {receive_command}')
-
-                self.decode_Command(str(receive_command), msg_queue)
+                self.decode_Command(str(command_pipe.recv()), msg_queue)
                 break   # Остановим чтение из com порта
 
 
