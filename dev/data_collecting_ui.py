@@ -111,6 +111,8 @@ class DataCollectingWindow(QMainWindow):
         self.STM_ComPort.Error_ComPort.connect(lambda error: self.error_handler(error))
         self.GPS_ComPort.Error_ComPort.connect(lambda error: self.error_handler(error))
 
+        self.STM_ComPort.EndOfInitialSettings.connect(self.end_of_initialSetting)
+
     def init_UI(self):
         self.init_Buttons()
         self.init_Plots()
@@ -189,7 +191,7 @@ class DataCollectingWindow(QMainWindow):
         Разблокировка виджетов, предназначенных для ввода информации от пользователя
         """
         # Разблокируем кнопки управления
-        self.Command_Buttons[Start_InitialSetting].setEnabled(True)
+        # self.Command_Buttons[Start_InitialSetting].setEnabled(True)
         self.Command_Buttons[Start_Measuring].setEnabled(True)
 
         # Разблокируем параметры сохранения
@@ -229,7 +231,33 @@ class DataCollectingWindow(QMainWindow):
         self.Command_Buttons[Stop_ReadingData].setEnabled(False)
 
     def start_InitialSetting(self):
-        print('+++')
+        self.update_logger()
+
+        # Сбросим накопленные данные
+        self.x_index = 0    # Индекс полученного пакета данных
+
+        # Запуск чтения данных с платы STM
+        if self.STM_Settings[List].currentText() == '-----':
+            message('Выберите корректный COM порт для STM', icon='Warning')
+            return
+
+        self.blockInputs()
+
+        self.Command_Buttons[Stop_Measuring].setEnabled(True)
+        self.Command_Buttons[Start_Measuring].setEnabled(False)
+
+        self.STM_ComPort.startInitialSettings(
+            com_port_name=self.STM_Settings[List].currentText(),
+            saving_path=self.Saving_Params[Dir][LineEdit].text(),
+            template_name=self.Saving_Params[FileName][LineEdit].text(),
+        )
+
+    # Такой кнопки нет, но всё равно разместим эту функцию в этой части кода
+    def end_of_initialSetting(self):
+        self.STM_ComPort.stopInitialSettings()
+        message(text='Завершение выставки датчиков', icon='i')
+        self.unblockInputs()
+        self.Command_Buttons[Start_InitialSetting].setEnabled(False)
 
     def start_Measuring(self):
         self.update_logger()

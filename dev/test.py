@@ -1,41 +1,25 @@
-# class A:
-#     def __init__(self):
-#         self.a = 10
-#
-#     def printing(self):
-#         print(self.a)
-#
-# class B(A):
-#     def __init__(self):
-#         super().__init__()
-#         self.b = 20
-#
-#     def printing(self):
-#         print(self.b)
-#         super().printing()
-#
-#
-# obj = B()
-# obj.printing()
+import enum
 
-import multiprocessing as mp
-from time import sleep
+class Decoder:
+    STM_Stages = enum.Enum(
+        value='STM_Stages',
+        names=['Want7E', 'self.Stages.WantE7', 'self.Stages.WantSize', 'self.Stages.WantFormat',
+               'self.Stages.WantPacketBody', 'self.Stages.WantConSum']
+    )
 
-def foo(q):
-    q.put(f'{q.get()} __ foo')
-
-class Foo:
     def __init__(self):
         pass
 
+    def foo(self):
+        stages = self.STM_Stages
+        # print('Member: {}'.format(stages.new))
+
+        print(stages.Want7E)
+
+        print('\nAll members:')
+        for status in stages:
+            print('{:15} = {}'.format(status.name, status.value))
 
 
-if __name__ == '__main__':
-    # mp.set_start_method('spawn')
-    q = mp.Queue()
-    p = mp.Process(target=foo, args=(q,))
-    p.start()
-    q.put('hello')
-    sleep(0.5)
-    print(q.get())
-    p.join()
+decoder = Decoder()
+decoder.foo()
