@@ -447,7 +447,7 @@ class COM_Port_GUI(QObject):
             self.ComPort_DecodingProcess = Process(target=self.Decoder.decoding,
                                                    args=(self.type_port, self.ComPort_Data, self.Decoded_Data, self.Duplicate_Queue, self.MessageQueue,),
                                                    daemon=True)
-            self.Decoded_Data_Checking = Thread(target=self.__queue_checking, args=(), daemon=True)
+            self.Decoded_Data_Checking = Thread(target=self._queue_checking, args=(), daemon=True)
 
             self.ComPort_ReadingProcess.start()
 
@@ -481,9 +481,9 @@ class COM_Port_GUI(QObject):
 
     ##############################################
 
-    def __queue_checking(self):
+    def _queue_checking(self):
         savingFile = open(self.savingFileName, 'wb')
-        print(self.savingFileName)
+        # print(self.savingFileName)
         while self.processingFlag or not self.__all_queue_empty():
             if not self.Decoded_Data.empty():
                 self._checking_DecodedData()
@@ -500,25 +500,7 @@ class COM_Port_GUI(QObject):
         return self.Duplicate_Queue.empty() and self.Decoded_Data.empty() and self.MessageQueue.empty()
 
     def _checking_DecodedData(self):
-        values = self.Decoded_Data.get()
-        print(values)
-        if self.type_port == 'STM':
-            self.NewData_Signal.emit({"type_port": self.type_port, "values": values})
-        elif self.type_port == 'GPS':
-            latitude_startIndex = values.find(",")
-            latitude_endIndex = values.find(",", latitude_startIndex + 1)
-
-            if (latitude_endIndex - latitude_startIndex) != 1:
-                latitude = float(values[latitude_startIndex + 1: latitude_endIndex])
-
-                longitude_startIndex = values.find(",", latitude_endIndex + 2)
-                longitude_endIndex = values.find(",", longitude_startIndex + 1)
-
-                longitude = float(values[longitude_startIndex + 1: longitude_endIndex])
-                self.NewData_Signal.emit({"type_port": self.type_port, "values": {"Latitude": latitude, "Longitude": longitude}})
-
-            else:
-                self.NewData_Signal.emit({"type_port": self.type_port, "values": {"Latitude": 99.99, "Longitude": 99.99}})
+        pass
 
     def __checking_MessageQueue(self):
         msg = str(self.MessageQueue.get())
@@ -551,7 +533,7 @@ class STM_ComPort(COM_Port_GUI):
     EndOfInitialSettings = pyqtSignal(str)
 
     def __init__(self, printer: Printing):
-        super().__init__(printer, "GPS")
+        super().__init__(printer, "STM")
 
     ##### Методы, напрямую вызываемые из GUI #####
     def startInitialSettings(self, com_port_name: str, saving_path: str, template_name: str):
@@ -572,19 +554,18 @@ class STM_ComPort(COM_Port_GUI):
 
     def stopMeasuring(self):
         # Пошлём команду завершения чтения данных на плату
-        if self.type_port == 'STM':
-            self.gui_connection.send('Command__stop_Measuring')
-            sleep(0.5)  # Для корректного завершения процесса
+        self.gui_connection.send('Command__stop_Measuring')
+        sleep(0.5)  # Для корректного завершения процесса
 
         self._stop_Processes()
         self.printer.printing('Конец чтения данных')
 
     ##############################################
-    # def _checking_DecodedData(self):
-    #     values = self.Decoded_Data.get()
-    #     print(values)
-    #     if self.type_port == 'STM':
-    #         self.NewData_Signal.emit({"type_port": self.type_port, "values": values})
+    def _checking_DecodedData(self):
+        values = self.Decoded_Data.get()
+        # print(values)
+        if self.type_port == 'STM':
+            self.NewData_Signal.emit({"type_port": self.type_port, "values": values})
 
     def _command_execution(self, command):
         if command == 'stop_InitialSetting':
@@ -595,17 +576,22 @@ class GPS_ComPort(COM_Port_GUI):
     """
     Класс для управления GPS модулем через COM порт
     """
-    EndOfCollectingCoordinates = pyqtSignal(str)
+    EndOfCollectingCoordinates = pyqtSignal()
+    DURATION_COORDINATES_COLLECTION = 5    # Время сбора координат в секундах
 
-    DURATION_COORDINATES_COLLECTION = 20    # Время сбора координат в секундах
     def __init__(self, printer: Printing):
-        super().__init__(printer, "STM")
+        super().__init__(printer, "GPS")
         self.timerFlag = False
         self.coordCollecting = Thread()
+        self.counter = 0
 
     ##### Метод, напрямую вызываемый из GUI #####
-    def gettingCoordinates(self):
+    def gettingCoordinates(self, com_port_name: str, saving_path: str, template_name: str):
         self.timerFlag = True
+        self.counter += 1
+        self.portName = com_port_name
+        self.savingFileName = f'{saving_path}/{template_name}_{self.type_port}_{self.counter}.txt'
+        self.processingFlag = True
         self._start_Processes()
         self.coordCollecting = Thread(target=self._collecting_coordinates, args=(), daemon=True)
         self.coordCollecting.start()
@@ -616,26 +602,27 @@ class GPS_ComPort(COM_Port_GUI):
         sleep(self.DURATION_COORDINATES_COLLECTION)
 
         # Закончим сбор координат
-
+        self._stop_Processes()
+        self.EndOfCollectingCoordinates.emit()
 
     ##############################################
-    # def _checking_DecodedData(self):
-    #     values = self.Decoded_Data.get()
-    #     # print(values)
-    #
-    #     latitude_startIndex = values.find(",")
-    #     latitude_endIndex = values.find(",", latitude_startIndex + 1)
-    #
-    #     if (latitude_endIndex - latitude_startIndex) != 1:
-    #         latitude = float(values[latitude_startIndex + 1: latitude_endIndex])
-    #
-    #         longitude_startIndex = values.find(",", latitude_endIndex + 2)
-    #         longitude_endIndex = values.find(",", longitude_startIndex + 1)
-    #
-    #         longitude = float(values[longitude_startIndex + 1: longitude_endIndex])
-    #         self.NewData_Signal.emit(
-    #             {"type_port": self.type_port, "values": {"Latitude": latitude, "Longitude": longitude}})
-    #
-    #     else:
-    #         self.NewData_Signal.emit(
-    #             {"type_port": self.type_port, "values": {"Latitude": 99.99, "Longitude": 99.99}})
+    def _checking_DecodedData(self):
+        values = self.Decoded_Data.get()
+        # print(values)
+
+        latitude_startIndex = values.find(",")
+        latitude_endIndex = values.find(",", latitude_startIndex + 1)
+
+        if (latitude_endIndex - latitude_startIndex) != 1:
+            latitude = float(values[latitude_startIndex + 1: latitude_endIndex])
+
+            longitude_startIndex = values.find(",", latitude_endIndex + 2)
+            longitude_endIndex = values.find(",", longitude_startIndex + 1)
+
+            longitude = float(values[longitude_startIndex + 1: longitude_endIndex])
+            self.NewData_Signal.emit(
+                {"type_port": self.type_port, "values": {"Latitude": latitude, "Longitude": longitude}})
+
+        else:
+            self.NewData_Signal.emit(
+                {"type_port": self.type_port, "values": {"Latitude": 99.99, "Longitude": 99.99}})

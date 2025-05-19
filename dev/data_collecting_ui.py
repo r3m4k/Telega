@@ -63,10 +63,10 @@ class DataCollectingWindow(QMainWindow):
         self.setWindowTitle('Сбор данных')
         self.setWindowIcon(QIcon('../ui/Telega.ico'))
 
-        self.PassageNum = 1                 # Номер проезда
-        self.UsingGps_Flag: bool = True      # Флаг использования GPS модуля
-        self.LoggerReady: bool = False      # Флаг законченной настройки логгера в self.printer
-
+        self.PassageNum = 1                   # Номер проезда
+        self.UsingGps_Flag: bool = True       # Флаг использования GPS модуля
+        self.LoggerReady: bool = False        # Флаг законченной настройки логгера в self.printer
+        self.CoordinatesAreCollected = False
         # Загрузим данные с прошлого использования
         with open(JSON_FILE, 'r') as json_file:
             self.json_data = json.load(json_file)
@@ -171,6 +171,7 @@ class DataCollectingWindow(QMainWindow):
         # Заблокируем кнопки управления
         self.Command_Buttons[Start_InitialSetting].setEnabled(False)
         self.Command_Buttons[Start_Measuring].setEnabled(False)
+        self.Command_Buttons[Get_Coordinates].setEnabled(False)
 
         # Заблокируем параметры сохранения
         self.Saving_Params[Dir][LineEdit].setReadOnly(True)
@@ -194,6 +195,7 @@ class DataCollectingWindow(QMainWindow):
         # Разблокируем кнопки управления
         # self.Command_Buttons[Start_InitialSetting].setEnabled(True)
         self.Command_Buttons[Start_Measuring].setEnabled(True)
+        self.Command_Buttons[Get_Coordinates].setEnabled(True)
 
         # Разблокируем параметры сохранения
         self.Saving_Params[Dir][LineEdit].setReadOnly(False)
@@ -261,12 +263,12 @@ class DataCollectingWindow(QMainWindow):
         # Сбросим накопленные данные
         self.x_index = 0    # Индекс полученного пакета данных
 
-        # Запуск чтения данных с платы STM
+        # Проверим корректность подключения платы STM
         if self.STM_Settings[List].currentText() == '-----':
             message('Выберите корректный COM порт для STM', icon='Warning')
             return
 
-        # Запуск чтения данных с модуля GPS
+        # Проверим корректность подключения GPS модуля
         if self.GPS_CheckBox.checkState() == Qt.CheckState.Checked:
             if self.GPS_Settings[List].currentText() == '-----':
                 message('Выберите корректный COM порт для GPS', icon='Warning')
@@ -276,24 +278,32 @@ class DataCollectingWindow(QMainWindow):
             self.GPS_Settings[List].setCurrentIndex(self.STM_Settings[List].findText('-----'))
             self.UsingGps_Flag = False
 
+
+        # Если используем GPS модуль, то уведомим пользователя о необходимости сбора координат текущего местоположения
+        if self.UsingGps_Flag:
+            if not self.CoordinatesAreCollected:
+                msg = QMessageBox()
+                msg.setWindowIcon(QIcon('../ui/Telega.ico'))
+                msg.setWindowTitle('Уведомление')
+                msg.setText('Начать сбор координат местоположения?')
+                msg.setStandardButtons(QMessageBox.Ok | QMessageBox.No)
+                msg.setIcon(QMessageBox.Question)
+                msg.show()
+                if msg.exec_() == QMessageBox.Ok:
+                    self.get_Coordinates()
+                    return
+                else:
+                    pass
+
         self.blockInputs()
-
         self.Command_Buttons[Stop_Measuring].setEnabled(True)
-
+        self.CoordinatesAreCollected = False
         self.STM_ComPort.startMeasuring(
             com_port_name=self.STM_Settings[List].currentText(),
             saving_path=self.Saving_Params[Dir][LineEdit].text(),
             template_name=self.Saving_Params[FileName][LineEdit].text(),
             data_type=f'RawData_{self.PassageNum}'
         )
-
-        if self.UsingGps_Flag:
-            self.GPS_ComPort.startMeasuring(
-                com_port_name=self.GPS_Settings[List].currentText(),
-                saving_path=self.Saving_Params[Dir][LineEdit].text(),
-                template_name=self.Saving_Params[FileName][LineEdit].text(),
-                data_type='RawData'
-            )
 
     def stop_Measuring(self):
         self.unblockInputs()
@@ -302,16 +312,30 @@ class DataCollectingWindow(QMainWindow):
         self.Command_Buttons[Get_Coordinates].setEnabled(True)
 
         self.STM_ComPort.stopMeasuring()
-        if self.UsingGps_Flag:
-            self.GPS_ComPort.stopMeasuring()
 
         self.PassageNum += 1
         self.Command_Buttons[Stop_Measuring].setEnabled(False)
 
     def get_Coordinates(self):
-        self.Command_Buttons[Stop_Measuring].setEnabled(False)
-        self.Command_Buttons[Start_Measuring].setEnabled(False)
-        self.GPS_ComPort.gettingCoordinates()
+        # Запуск чтения данных с модуля GPS
+        if self.GPS_CheckBox.checkState() == Qt.CheckState.Checked:
+            if self.GPS_Settings[List].currentText() == '-----':
+                message('Выберите корректный COM порт для GPS', icon='Warning')
+                return
+
+            self.Command_Buttons[Stop_Measuring].setEnabled(False)
+            self.Command_Buttons[Start_Measuring].setEnabled(False)
+            self.Command_Buttons[Get_Coordinates].setEnabled(False)
+
+            self.GPS_ComPort.gettingCoordinates(
+                com_port_name=self.GPS_Settings[List].currentText(),
+                saving_path=self.Saving_Params[Dir][LineEdit].text(),
+                template_name=self.Saving_Params[FileName][LineEdit].text(),
+            )
+        else:
+            self.printer.printing(text='GPS модуль не подключён!')
+            self.GPS_Settings[List].setCurrentIndex(self.STM_Settings[List].findText('-----'))
+            self.UsingGps_Flag = False
 
     ####### Функционал для self.Plot_Widget #######
     def init_Plots(self):
@@ -363,7 +387,11 @@ class DataCollectingWindow(QMainWindow):
 
     ####### Функционал для self.SavingSettings_Widget #######
     def init_SavingSettings(self):
-        self.Saving_Params[Dir][LineEdit].setText(self.json_data["DataCollecting"]["dir"])
+        try:
+            self.Saving_Params[Dir][LineEdit].setText(self.json_data["DataCollecting"]["dir"])
+        except Exception:
+            pass
+
         self.Saving_Params[Dir][LineEdit].setEnabled(False)
         self.Saving_Params[Dir][Help_Button].clicked.connect(self.set_SavingPath)
 
@@ -437,4 +465,9 @@ class DataCollectingWindow(QMainWindow):
     def end_of_getting_coordinates(self):
         self.Command_Buttons[Stop_Measuring].setEnabled(True)
         self.Command_Buttons[Start_Measuring].setEnabled(True)
+        self.Command_Buttons[Get_Coordinates].setEnabled(True)
+
         message(text='Завершён сбор координат текущего местоположения', icon='i')
+        self.printer.printing('Завершён сбор координат текущего местоположения')
+
+        self.CoordinatesAreCollected = True
