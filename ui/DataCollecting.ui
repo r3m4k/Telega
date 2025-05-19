@@ -241,7 +241,7 @@
       </widget>
      </item>
      <item>
-      <widget class="QPushButton" name="Stop_ReadingData">
+      <widget class="QPushButton" name="Get_Coordinates">
        <property name="sizePolicy">
         <sizepolicy hsizetype="Minimum" vsizetype="Preferred">
          <horstretch>0</horstretch>
@@ -254,7 +254,7 @@
         </font>
        </property>
        <property name="text">
-        <string>Остановить чтение данных</string>
+        <string>Получить текущие координаты</string>
        </property>
       </widget>
      </item>
