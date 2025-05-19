@@ -1,4 +1,9 @@
+from random import random
+
 class A:
+    def __init__(self):
+        self.val = random()
+
     def a(self):
         print('Class A')
         self.b()
@@ -8,9 +13,15 @@ class A:
 
 class B(A):
     def b(self):
-        print('Class B')
+        print(f'Class B, val = {self.val}')
+
+class C(A):
+    def b(self):
+        print(f'Class C, val = {self.val}')
 
 
-tmp = B
-obj = tmp()
-obj.a()
+b = B()
+b.a()
+
+c = C()
+c.a()
