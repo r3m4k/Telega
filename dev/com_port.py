@@ -31,6 +31,16 @@ from printing import Printing
 Менеджер создает так называемый прокси‑объект для каждого процесса, и процессы обращаются именно к прокси‑объекту.
 """
 
+
+def get_ComPorts() -> dir:
+    iterator = comports(include_links=False)
+    res = {'-----': {"desc": "Здесь будут отображаться дескриптор выбранного COM порта"}}
+    for n, (_port, desc, hwid) in enumerate(iterator, 1):
+        res[_port] = {"desc": desc, "hwid": hwid}
+
+    return res
+
+
 BAUDRATE = {"STM": 115200, "GPS": 4800}       # Скорость работы COM порта
 
 
@@ -375,19 +385,18 @@ class DecodeProxy(NamespaceProxy):
 
 class COM_Port_GUI(QObject):
     """
-    Класс для управления COM портом из GUI
+    Базовый класс для управления COM портом из GUI
     """
     MyManager.register('ComPort', COM_Port, COM_PortProxy)
     MyManager.register('Decoder', Decoder, DecodeProxy)
 
     NewData_Signal = pyqtSignal(dict)
     Error_ComPort = pyqtSignal(dict)
-    EndOfInitialSettings = pyqtSignal(str)
 
     def __init__(self, printer: Printing, type_port: str):
         super().__init__()
         self.printer = printer              # Объект, с помощью которого будем выводить информацию в GUI, stdout и logger
-        self.type_port = type_port    # Тип подключённого датчика по данному порту: STM или GPS
+        self.type_port = type_port          # Тип подключённого датчика по данному порту: STM или GPS
         self.processingFlag = False         # Флаг необходимости анализировать данные. Равен True после self.startMeasuring
                                             # И равен False после self.stopMeasuring
         self.portName = ''                  # Имя COM порта
@@ -417,47 +426,12 @@ class COM_Port_GUI(QObject):
         self.Decoded_Data_Checking = Thread()
 
     def __del__(self):
-        self.__stop_Processes()
+        self._stop_Processes()
         self.gui_connection.close()
-
-    ##### Методы, напрямую вызываемые из GUI #####
-    @staticmethod
-    def get_ComPorts() -> dir:
-        iterator = comports(include_links=False)
-        res = {'-----': {"desc": "Здесь будут отображаться дескриптор выбранного COM порта"}}
-        for n, (_port, desc, hwid) in enumerate(iterator, 1):
-            res[_port] = {"desc": desc, "hwid": hwid}
-
-        return res
-
-    def startInitialSettings(self, com_port_name: str, saving_path: str, template_name: str):
-        self.portName = com_port_name
-        self.savingFileName = f'{saving_path}/{template_name}_{self.type_port}_Init.bin'
-        self.processingFlag = True
-        self.__start_Processes('Command__start_InitialSetting')
-
-    def stopInitialSettings(self):
-        self.__stop_Processes()
-        self.printer.printing('Конец выставки датчиков')
-
-    def startMeasuring(self, com_port_name: str, saving_path: str, template_name: str, data_type: str):
-        self.portName = com_port_name
-        self.savingFileName = f'{saving_path}/{template_name}_{self.type_port}_{data_type}.bin'
-        self.processingFlag = True
-        self.__start_Processes('Command__start_Measuring')
-
-    def stopMeasuring(self):
-        # Пошлём команду завершения чтения данных на плату
-        if self.type_port == 'STM':
-            self.gui_connection.send('Command__stop_Measuring')
-            sleep(0.5)  # Для корректного завершения процесса
-
-        self.__stop_Processes()
-        self.printer.printing('Конец чтения данных')
 
     ##############################################
 
-    def __start_Processes(self, command=''):
+    def _start_Processes(self, command=''):
         """
         Запуск процессов
         """
@@ -467,8 +441,12 @@ class COM_Port_GUI(QObject):
             self.isProcessesActive = True
 
             # По новой инициализируем все процессы для корректного запуска при повторном вызове функции
-            self.ComPort_ReadingProcess = Process(target=self.ComPort.startMeasuring, args=(self.portName, BAUDRATE[self.type_port], self.ComPort_Data, self.hardware_connection, self.MessageQueue, command, ), daemon=True)
-            self.ComPort_DecodingProcess = Process(target=self.Decoder.decoding, args=(self.type_port, self.ComPort_Data, self.Decoded_Data, self.Duplicate_Queue, self.MessageQueue,), daemon=True)
+            self.ComPort_ReadingProcess = Process(target=self.ComPort.startMeasuring,
+                                                  args=(self.portName, BAUDRATE[self.type_port], self.ComPort_Data, self.hardware_connection, self.MessageQueue, command, ),
+                                                  daemon=True)
+            self.ComPort_DecodingProcess = Process(target=self.Decoder.decoding,
+                                                   args=(self.type_port, self.ComPort_Data, self.Decoded_Data, self.Duplicate_Queue, self.MessageQueue,),
+                                                   daemon=True)
             self.Decoded_Data_Checking = Thread(target=self.__queue_checking, args=(), daemon=True)
 
             self.ComPort_ReadingProcess.start()
@@ -478,7 +456,7 @@ class COM_Port_GUI(QObject):
             self.ComPort_DecodingProcess.start()
             self.Decoded_Data_Checking.start()
 
-    def __stop_Processes(self):
+    def _stop_Processes(self):
         """
         Остановка процессов
         """
@@ -498,7 +476,8 @@ class COM_Port_GUI(QObject):
                 self.Decoded_Data_Checking.join()
 
             except Exception as error:
-                self.MessageQueue.put(f'Critical__\n{error}\n{traceback.format_exc()}')
+                self.Error_ComPort.emit({"type_port": self.type_port, "message": '!!! Критическая ошибка. Проверьте log файл !!!'})
+                self.printer.printing(text='!!! Критическая ошибка. Проверьте log файл !!!', log_text=error, log_level='Critical')
 
     ##############################################
 
@@ -507,7 +486,7 @@ class COM_Port_GUI(QObject):
         print(self.savingFileName)
         while self.processingFlag or not self.__all_queue_empty():
             if not self.Decoded_Data.empty():
-                self.__checking_DecodedData()
+                self._checking_DecodedData()
 
             if not self.MessageQueue.empty():
                 self.__checking_MessageQueue()
@@ -520,9 +499,9 @@ class COM_Port_GUI(QObject):
     def __all_queue_empty(self) -> bool:
         return self.Duplicate_Queue.empty() and self.Decoded_Data.empty() and self.MessageQueue.empty()
 
-    def __checking_DecodedData(self):
+    def _checking_DecodedData(self):
         values = self.Decoded_Data.get()
-        # print(values)
+        print(values)
         if self.type_port == 'STM':
             self.NewData_Signal.emit({"type_port": self.type_port, "values": values})
         elif self.type_port == 'GPS':
@@ -558,7 +537,105 @@ class COM_Port_GUI(QObject):
                 self.Error_ComPort.emit({"type_port": self.type_port, "message": '!!! Критическая ошибка. Проверьте log файл !!!'})
                 self.printer.printing(text='!!! Критическая ошибка. Проверьте log файл !!!', log_text=msg_text, log_level=msg_type)
             case 'Command':
-                if msg_text == 'stop_InitialSetting':
-                    self.EndOfInitialSettings.emit('Info__Выставка датчика завершена')
+                self._command_execution(msg_text)
             case _:
                 pass
+
+    def _command_execution(self, command):
+        pass
+
+class STM_ComPort(COM_Port_GUI):
+    """
+    Класс для управления платой STM32 через COM порт
+    """
+    EndOfInitialSettings = pyqtSignal(str)
+
+    def __init__(self, printer: Printing):
+        super().__init__(printer, "GPS")
+
+    ##### Методы, напрямую вызываемые из GUI #####
+    def startInitialSettings(self, com_port_name: str, saving_path: str, template_name: str):
+        self.portName = com_port_name
+        self.savingFileName = f'{saving_path}/{template_name}_{self.type_port}_Init.bin'
+        self.processingFlag = True
+        self._start_Processes('Command__start_InitialSetting')
+
+    def stopInitialSettings(self):
+        self._stop_Processes()
+        self.printer.printing('Конец выставки датчиков')
+
+    def startMeasuring(self, com_port_name: str, saving_path: str, template_name: str, data_type: str):
+        self.portName = com_port_name
+        self.savingFileName = f'{saving_path}/{template_name}_{self.type_port}_{data_type}.bin'
+        self.processingFlag = True
+        self._start_Processes('Command__start_Measuring')
+
+    def stopMeasuring(self):
+        # Пошлём команду завершения чтения данных на плату
+        if self.type_port == 'STM':
+            self.gui_connection.send('Command__stop_Measuring')
+            sleep(0.5)  # Для корректного завершения процесса
+
+        self._stop_Processes()
+        self.printer.printing('Конец чтения данных')
+
+    ##############################################
+    # def _checking_DecodedData(self):
+    #     values = self.Decoded_Data.get()
+    #     print(values)
+    #     if self.type_port == 'STM':
+    #         self.NewData_Signal.emit({"type_port": self.type_port, "values": values})
+
+    def _command_execution(self, command):
+        if command == 'stop_InitialSetting':
+            self.EndOfInitialSettings.emit()
+
+
+class GPS_ComPort(COM_Port_GUI):
+    """
+    Класс для управления GPS модулем через COM порт
+    """
+    EndOfCollectingCoordinates = pyqtSignal(str)
+
+    DURATION_COORDINATES_COLLECTION = 20    # Время сбора координат в секундах
+    def __init__(self, printer: Printing):
+        super().__init__(printer, "STM")
+        self.timerFlag = False
+        self.coordCollecting = Thread()
+
+    ##### Метод, напрямую вызываемый из GUI #####
+    def gettingCoordinates(self):
+        self.timerFlag = True
+        self._start_Processes()
+        self.coordCollecting = Thread(target=self._collecting_coordinates, args=(), daemon=True)
+        self.coordCollecting.start()
+
+    ##############################################
+    def _collecting_coordinates(self):
+        # Подождём указанное время, пока в другом процессе идёт сбор данных
+        sleep(self.DURATION_COORDINATES_COLLECTION)
+
+        # Закончим сбор координат
+
+
+    ##############################################
+    # def _checking_DecodedData(self):
+    #     values = self.Decoded_Data.get()
+    #     # print(values)
+    #
+    #     latitude_startIndex = values.find(",")
+    #     latitude_endIndex = values.find(",", latitude_startIndex + 1)
+    #
+    #     if (latitude_endIndex - latitude_startIndex) != 1:
+    #         latitude = float(values[latitude_startIndex + 1: latitude_endIndex])
+    #
+    #         longitude_startIndex = values.find(",", latitude_endIndex + 2)
+    #         longitude_endIndex = values.find(",", longitude_startIndex + 1)
+    #
+    #         longitude = float(values[longitude_startIndex + 1: longitude_endIndex])
+    #         self.NewData_Signal.emit(
+    #             {"type_port": self.type_port, "values": {"Latitude": latitude, "Longitude": longitude}})
+    #
+    #     else:
+    #         self.NewData_Signal.emit(
+    #             {"type_port": self.type_port, "values": {"Latitude": 99.99, "Longitude": 99.99}})

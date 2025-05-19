@@ -14,7 +14,7 @@ from time import sleep
 from threading import Thread
 
 from message import message
-from com_port import COM_Port_GUI
+from com_port import COM_Port_GUI, get_ComPorts, STM_ComPort, GPS_ComPort
 from printing import Printing
 
 
@@ -25,7 +25,7 @@ JSON_FILE = '../dev/history.json'
 Start_InitialSetting = 0
 Start_Measuring = 1
 Stop_Measuring = 2
-Stop_ReadingData = 3
+Get_Coordinates = 3
 
 # Индексы осей
 X = 0; Y = 1; Z = 2
@@ -97,8 +97,8 @@ class DataCollectingWindow(QMainWindow):
 
         # Создадим нужные экземпляры классов
         self.printer = Printing()
-        self.STM_ComPort = COM_Port_GUI(self.printer, "STM")
-        self.GPS_ComPort = COM_Port_GUI(self.printer, "GPS")
+        self.STM_ComPort = STM_ComPort(self.printer)
+        self.GPS_ComPort = GPS_ComPort(self.printer)
 
         self.init_UI()
 
@@ -112,6 +112,7 @@ class DataCollectingWindow(QMainWindow):
         self.GPS_ComPort.Error_ComPort.connect(lambda error: self.error_handler(error))
 
         self.STM_ComPort.EndOfInitialSettings.connect(self.end_of_initialSetting)
+        self.GPS_ComPort.EndOfCollectingCoordinates.connect(self.end_of_getting_coordinates)
 
     def init_UI(self):
         self.init_Buttons()
@@ -225,10 +226,9 @@ class DataCollectingWindow(QMainWindow):
         self.Command_Buttons[Start_InitialSetting].clicked.connect(self.start_InitialSetting)
         self.Command_Buttons[Start_Measuring].clicked.connect(self.start_Measuring)
         self.Command_Buttons[Stop_Measuring].clicked.connect(self.stop_Measuring)
-        self.Command_Buttons[Stop_ReadingData].clicked.connect(self.stop_ReadingData)
+        self.Command_Buttons[Get_Coordinates].clicked.connect(self.get_Coordinates)
 
         self.Command_Buttons[Stop_Measuring].setEnabled(False)
-        self.Command_Buttons[Stop_ReadingData].setEnabled(False)
 
     def start_InitialSetting(self):
         self.update_logger()
@@ -253,11 +253,6 @@ class DataCollectingWindow(QMainWindow):
         )
 
     # Такой кнопки нет, но всё равно разместим эту функцию в этой части кода
-    def end_of_initialSetting(self):
-        self.STM_ComPort.stopInitialSettings()
-        message(text='Завершение выставки датчиков', icon='i')
-        self.unblockInputs()
-        self.Command_Buttons[Start_InitialSetting].setEnabled(False)
 
     def start_Measuring(self):
         self.update_logger()
@@ -304,7 +299,7 @@ class DataCollectingWindow(QMainWindow):
         self.unblockInputs()
 
         self.Command_Buttons[Stop_Measuring].setEnabled(True)
-        self.Command_Buttons[Stop_ReadingData].setEnabled(True)
+        self.Command_Buttons[Get_Coordinates].setEnabled(True)
 
         self.STM_ComPort.stopMeasuring()
         if self.UsingGps_Flag:
@@ -313,8 +308,10 @@ class DataCollectingWindow(QMainWindow):
         self.PassageNum += 1
         self.Command_Buttons[Stop_Measuring].setEnabled(False)
 
-    def stop_ReadingData(self):
-        print('===')
+    def get_Coordinates(self):
+        self.Command_Buttons[Stop_Measuring].setEnabled(False)
+        self.Command_Buttons[Start_Measuring].setEnabled(False)
+        self.GPS_ComPort.gettingCoordinates()
 
     ####### Функционал для self.Plot_Widget #######
     def init_Plots(self):
@@ -367,6 +364,7 @@ class DataCollectingWindow(QMainWindow):
     ####### Функционал для self.SavingSettings_Widget #######
     def init_SavingSettings(self):
         self.Saving_Params[Dir][LineEdit].setText(self.json_data["DataCollecting"]["dir"])
+        self.Saving_Params[Dir][LineEdit].setEnabled(False)
         self.Saving_Params[Dir][Help_Button].clicked.connect(self.set_SavingPath)
 
         self.Saving_Params[FileName][LineEdit].setText(f'telega_{str(date.today())}')
@@ -380,7 +378,7 @@ class DataCollectingWindow(QMainWindow):
 
     ####### Функционал для self.STM_Settings #######
     def init_STM_Settings(self):
-        com_ports = self.STM_ComPort.get_ComPorts()
+        com_ports = get_ComPorts()
         self.STM_Settings[List].addItems(com_ports)
 
         # Зададим значение по умолчанию, если в дескрипторе есть 'STM'
@@ -389,7 +387,7 @@ class DataCollectingWindow(QMainWindow):
                 self.STM_Settings[List].setCurrentIndex(list(com_ports.keys()).index(port))
 
         self.STM_Settings[Help_Button].clicked.connect(
-            lambda: message(self.STM_ComPort.get_ComPorts()[f'{self.STM_Settings[List].currentText()}']["desc"],
+            lambda: message(get_ComPorts()[f'{self.STM_Settings[List].currentText()}']["desc"],
                             icon='Information')
         )
 
@@ -397,7 +395,7 @@ class DataCollectingWindow(QMainWindow):
         self.STM_Settings[UpdateButton].setIcon(QIcon('../ui/update.jpg'))
 
     def update_STM_ComPorts(self):
-        com_ports = self.STM_ComPort.get_ComPorts()
+        com_ports = get_ComPorts()
         self.STM_Settings[List].clear()
         self.STM_Settings[List].addItems(com_ports)
 
@@ -408,7 +406,7 @@ class DataCollectingWindow(QMainWindow):
 
     ####### Функционал для self.GPS_Settings #######
     def init_GPS_Settings(self):
-        com_ports = self.GPS_ComPort.get_ComPorts()
+        com_ports = get_ComPorts()
         self.GPS_Settings[List].addItems(com_ports)
 
         # Зададим значение по умолчанию, если в дескрипторе есть 'GPS'
@@ -417,7 +415,7 @@ class DataCollectingWindow(QMainWindow):
                 self.GPS_Settings[List].setCurrentIndex(list(com_ports.keys()).index(port))
 
         self.GPS_Settings[Help_Button].clicked.connect(
-            lambda: message(self.GPS_ComPort.get_ComPorts()[f'{self.GPS_Settings[List].currentText()}']["desc"],
+            lambda: message(get_ComPorts()[f'{self.GPS_Settings[List].currentText()}']["desc"],
                             icon='Information')
         )
 
@@ -425,6 +423,18 @@ class DataCollectingWindow(QMainWindow):
         self.GPS_Settings[UpdateButton].setIcon(QIcon('../ui/update.jpg'))
 
     def update_GPS_ComPorts(self):
-        com_ports = self.STM_ComPort.get_ComPorts()
+        com_ports = get_ComPorts()
         self.GPS_Settings[List].clear()
         self.GPS_Settings[List].addItems(com_ports)
+
+    ####### Дополнительный функционал #######
+    def end_of_initialSetting(self):
+        self.STM_ComPort.stopInitialSettings()
+        message(text='Завершена выставка датчиков', icon='i')
+        self.unblockInputs()
+        self.Command_Buttons[Start_InitialSetting].setEnabled(False)
+
+    def end_of_getting_coordinates(self):
+        self.Command_Buttons[Stop_Measuring].setEnabled(True)
+        self.Command_Buttons[Start_Measuring].setEnabled(True)
+        message(text='Завершён сбор координат текущего местоположения', icon='i')
