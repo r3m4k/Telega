@@ -13,12 +13,13 @@ from datetime import date
 from time import sleep
 from threading import Thread
 
+from consts import CWD
 from message import message
 from com_port import COM_Port_GUI, get_ComPorts, STM_ComPort, GPS_ComPort
 from printing import Printing
 
 
-JSON_FILE = '../dev/history.json'
+JSON_FILE = f'{CWD}/dev/history.json'
 
 
 # Индексы для Buttons
@@ -43,14 +44,14 @@ List = 0; Help_Button = 1; UpdateButton = 2
 Dir = 0; FileName = 1
 LineEdit = 0
 
-# Параметры для графиков
-titles = ["Acc_X", "Acc_Y", "Acc_Z", "Gyro_X", "Gyro_Y", "Gyro_Z"]
-colors = [["#1F77B4", "#D62728", "#2CA02C"],
-          ["#17BECF", "#FF7F0E", "#9467BD"]]
-y_labels = [["Acc_X, m/s**2", "Acc_Y, m/s**2", "Acc_Z, m/s**2"],
-            ["Gyro_X, mdps", "Gyro_Y, mdps", "Gyro_Z, mdps"]]
-MAX_X_LENGTH = 32       # Максимальное количество точек на графиках
-PERIOD = 0.25           # Период получения данных с платы STM
+# # Параметры для графиков
+# titles = ["Acc_X", "Acc_Y", "Acc_Z", "Gyro_X", "Gyro_Y", "Gyro_Z"]
+# colors = [["#1F77B4", "#D62728", "#2CA02C"],
+#           ["#17BECF", "#FF7F0E", "#9467BD"]]
+# y_labels = [["Acc_X, m/s**2", "Acc_Y, m/s**2", "Acc_Z, m/s**2"],
+#             ["Gyro_X, mdps", "Gyro_Y, mdps", "Gyro_Z, mdps"]]
+# MAX_X_LENGTH = 32       # Максимальное количество точек на графиках
+# PERIOD = 0.25           # Период получения данных с платы STM
 
 
 class DataCollectingWindow(QMainWindow):
@@ -59,21 +60,22 @@ class DataCollectingWindow(QMainWindow):
 
     def __init__(self):
         super(QMainWindow, self).__init__(parent=None)
-        self.ui = loadUi('../ui/DataCollecting.ui', self)
+        self.ui = loadUi(f'{CWD}/ui/DataCollecting.ui', self)
         self.setWindowTitle('Сбор данных')
-        self.setWindowIcon(QIcon('../ui/Telega.ico'))
+        self.setWindowIcon(QIcon(f'{CWD}/ui/Telega.ico'))
 
         self.PassageNum = 1                   # Номер проезда
         self.UsingGps_Flag: bool = True       # Флаг использования GPS модуля
         self.LoggerReady: bool = False        # Флаг законченной настройки логгера в self.printer
         self.CoordinatesAreCollected = False
+
         # Загрузим данные с прошлого использования
         with open(JSON_FILE, 'r') as json_file:
             self.json_data = json.load(json_file)
 
         # Настройка виджетов
         self.Command_Buttons = [self.ui.Buttons.itemAt(i).widget() for i in range(4)]
-        self.Plots = [[self.ui.Plot_Widget.itemAtPosition(row, column).widget() for row in range(1, 4)] for column in range(2)]
+        # self.Plots = [[self.ui.Plot_Widget.itemAtPosition(row, column).widget() for row in range(1, 4)] for column in range(2)]
         self.Sensor_Values = [[self.ui.Values_Widget.itemAtPosition(row, column).widget() for row in range(3)] for column in range(1, 4, 2)]
         self.Saving_Params = [[self.ui.SavingSettings_Widget.itemAtPosition(row, column).widget() for column in range(1, 3)] for row in range(2)]
         self.STM_Settings = [self.ui.COM_Port_STM_Settings.itemAt(i).widget() for i in range(1, 4)]
@@ -88,12 +90,12 @@ class DataCollectingWindow(QMainWindow):
         #-------------------
 
         # Настройка графиков
-        self.pens = [[pg.mkPen(colors[data][axis], width=2) for axis in [X, Y, Z]] for data in [Acc, Gyro]]
-        self.lines = [[self.Plots[data][axis].plot() for axis in [X, Y, Z]] for data in [Acc, Gyro]]
-        self.x_index = 0
-        self.x_array = np.arange(0, MAX_X_LENGTH * PERIOD, PERIOD)
-        self.plot_values = {"Acc_X": np.zeros_like(self.x_array), "Acc_Y": np.zeros_like(self.x_array), "Acc_Z": np.zeros_like(self.x_array),
-                            "Gyro_X": np.zeros_like(self.x_array), "Gyro_Y": np.zeros_like(self.x_array), "Gyro_Z": np.zeros_like(self.x_array)}
+        # self.pens = [[pg.mkPen(colors[data][axis], width=2) for axis in [X, Y, Z]] for data in [Acc, Gyro]]
+        # self.lines = [[self.Plots[data][axis].plot() for axis in [X, Y, Z]] for data in [Acc, Gyro]]
+        # self.x_index = 0
+        # self.x_array = np.arange(0, MAX_X_LENGTH * PERIOD, PERIOD)
+        # self.plot_values = {"Acc_X": np.zeros_like(self.x_array), "Acc_Y": np.zeros_like(self.x_array), "Acc_Z": np.zeros_like(self.x_array),
+        #                     "Gyro_X": np.zeros_like(self.x_array), "Gyro_Y": np.zeros_like(self.x_array), "Gyro_Z": np.zeros_like(self.x_array)}
 
         # Создадим нужные экземпляры классов
         self.printer = Printing()
@@ -116,7 +118,7 @@ class DataCollectingWindow(QMainWindow):
 
     def init_UI(self):
         self.init_Buttons()
-        self.init_Plots()
+        # self.init_Plots()
         self.init_Values()
         self.init_SavingSettings()
         self.init_STM_Settings()
@@ -157,7 +159,7 @@ class DataCollectingWindow(QMainWindow):
                 pass
 
     def update_STMData(self, values: dir):
-        self.update_Plots(values)
+        # self.update_Plots(values)
         self.update_Values(values)
 
     def update_GPSData(self, values: dir):
@@ -219,7 +221,6 @@ class DataCollectingWindow(QMainWindow):
                 self.unblockInputs()
                 message(text=error["message"], icon='Critical')
             case "GPS":
-                self.GPS_ComPort.stopMeasuring()
                 self.unblockInputs()
                 message(text=error["message"], icon='Critical')
 
@@ -236,7 +237,7 @@ class DataCollectingWindow(QMainWindow):
         self.update_logger()
 
         # Сбросим накопленные данные
-        self.x_index = 0    # Индекс полученного пакета данных
+        # self.x_index = 0    # Индекс полученного пакета данных
 
         # Запуск чтения данных с платы STM
         if self.STM_Settings[List].currentText() == '-----':
@@ -261,7 +262,7 @@ class DataCollectingWindow(QMainWindow):
         self.PassageNum_Widget.setText(f'№ {self.PassageNum}')
 
         # Сбросим накопленные данные
-        self.x_index = 0    # Индекс полученного пакета данных
+        # self.x_index = 0    # Индекс полученного пакета данных
 
         # Проверим корректность подключения платы STM
         if self.STM_Settings[List].currentText() == '-----':
@@ -338,44 +339,44 @@ class DataCollectingWindow(QMainWindow):
             self.UsingGps_Flag = False
 
     ####### Функционал для self.Plot_Widget #######
-    def init_Plots(self):
-        for data in [Acc, Gyro]:
-            for axis in [X, Y, Z]:
-                self.Plots[data][axis].setBackground("w")
-                self.Plots[data][axis].showGrid(x=True, y=True)
-                plot_style = {"color": "grey", "font-size": "14px"}
-                self.Plots[data][axis].setLabel("left", y_labels[data][axis], **plot_style)
-                if axis == Z:
-                    self.Plots[data][axis].setLabel("bottom", "Time, seconds", **plot_style)
-
-                self.lines[data][axis] = self.Plots[data][axis].plot(self.x_array, self.plot_values[titles[3 * data + axis]], pen=self.pens[data][axis])
-
-    def update_Plots(self, values: dir):
-        if self.x_index < MAX_X_LENGTH:
-            self.x_array[self.x_index] = values["Time"]
-            for title in titles:
-                self.plot_values[title][self.x_index] = values[title]
-
-            # Если получили первую посылку данных, то выровняем графики
-            if self.x_index == 0:
-                self.x_array = np.arange(values["Time"], values["Time"] + MAX_X_LENGTH * PERIOD, PERIOD)
-                for data in [Acc, Gyro]:
-                    for axis in [X, Y, Z]:
-                        for index in range(1, len(self.x_array)):
-                            self.plot_values[titles[3 * data + axis]][index] = self.plot_values[titles[3 * data + axis]][0]
-
-            self.x_index += 1
-
-        else:
-            self.x_array = self.x_array[1:]
-            self.x_array = np.append(self.x_array, values["Time"])
-            for title in titles:
-                self.plot_values[title] = self.plot_values[title][1:]
-                self.plot_values[title] = np.append(self.plot_values[title], values[title])
-
-        for data in [Acc, Gyro]:
-            for axis in [X, Y, Z]:
-                self.lines[data][axis].setData(self.x_array, self.plot_values[titles[3 * data + axis]])
+    # def init_Plots(self):
+    #     for data in [Acc, Gyro]:
+    #         for axis in [X, Y, Z]:
+    #             self.Plots[data][axis].setBackground("w")
+    #             self.Plots[data][axis].showGrid(x=True, y=True)
+    #             plot_style = {"color": "grey", "font-size": "14px"}
+    #             self.Plots[data][axis].setLabel("left", y_labels[data][axis], **plot_style)
+    #             if axis == Z:
+    #                 self.Plots[data][axis].setLabel("bottom", "Time, seconds", **plot_style)
+    #
+    #             self.lines[data][axis] = self.Plots[data][axis].plot(self.x_array, self.plot_values[titles[3 * data + axis]], pen=self.pens[data][axis])
+    #
+    # def update_Plots(self, values: dir):
+    #     if self.x_index < MAX_X_LENGTH:
+    #         self.x_array[self.x_index] = values["Time"]
+    #         for title in titles:
+    #             self.plot_values[title][self.x_index] = values[title]
+    #
+    #         # Если получили первую посылку данных, то выровняем графики
+    #         if self.x_index == 0:
+    #             self.x_array = np.arange(values["Time"], values["Time"] + MAX_X_LENGTH * PERIOD, PERIOD)
+    #             for data in [Acc, Gyro]:
+    #                 for axis in [X, Y, Z]:
+    #                     for index in range(1, len(self.x_array)):
+    #                         self.plot_values[titles[3 * data + axis]][index] = self.plot_values[titles[3 * data + axis]][0]
+    #
+    #         self.x_index += 1
+    #
+    #     else:
+    #         self.x_array = self.x_array[1:]
+    #         self.x_array = np.append(self.x_array, values["Time"])
+    #         for title in titles:
+    #             self.plot_values[title] = self.plot_values[title][1:]
+    #             self.plot_values[title] = np.append(self.plot_values[title], values[title])
+    #
+    #     for data in [Acc, Gyro]:
+    #         for axis in [X, Y, Z]:
+    #             self.lines[data][axis].setData(self.x_array, self.plot_values[titles[3 * data + axis]])
 
     ####### Функционал для self.Sensor_Values #######
     def init_Values(self):
