@@ -8,6 +8,7 @@ from PyQt5.QtGui import QIcon
 from data_collecting_ui import DataCollectingWindow
 from data_processing_ui import DataProcessingWindow
 from message import message
+from consts import CWD
 
 
 class MainWindow(QMainWindow):
@@ -16,9 +17,9 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super(QMainWindow, self).__init__(parent=None)
-        self.ui = loadUi('../ui/MainWindow.ui', self)
+        self.ui = loadUi(f'{CWD}/ui/MainWindow.ui', self)
         self.setWindowTitle("TelegaSoft")
-        self.setWindowIcon(QIcon('../ui/Telega.ico'))
+        self.setWindowIcon(QIcon(f'{CWD}/ui/Telega.ico'))
 
         self.init_UI()
 
