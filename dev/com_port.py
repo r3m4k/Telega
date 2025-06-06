@@ -1,9 +1,6 @@
 import os
-import _io
-import sys
 from time import sleep
 import binascii
-from random import random
 import traceback
 import enum
 
@@ -21,7 +18,6 @@ from serial.serialutil import SerialException
 
 from PyQt5.QtCore import QObject, pyqtSignal
 
-from message import message
 from printing import Printing
 
 
@@ -58,7 +54,8 @@ class COM_Port:
     }
 
     received_msg = {
-        "confirmation_Message":    bytes([0x7e, 0xe7, 0xff, 0xaa, 0xaa, 0xb8, 0, 0])
+        "confirmation_Message":    bytes([0x7e, 0xe7, 0xff, 0xaa, 0xaa, 0xb8, 0, 0]),
+        "end_of_InitialSetting":   bytes([0x7e, 0xe7, 0xff, 0xba, 0xab, 0xc9, 0, 0])
     }
 
     def __init__(self):
@@ -162,10 +159,8 @@ class Decoder:
 
     def decoding(self, type_name: str, source_queue: Queue, output_queue: Queue, duplicate_queue: Queue, msg_queue: Queue):
         try:
-            if type_name == "STM":
+            if (type_name == "STM") or (type_name == "GPS"):
                 self.decoding_STM(source_queue, output_queue, duplicate_queue, msg_queue)
-            elif type_name == "GPS":
-                self.decoding_GPS(source_queue, output_queue, duplicate_queue, msg_queue)
             else:
                 raise RuntimeError('Неправильно передан параметр type_name.\n'
                                    f'Он может принимать значения "STM" или "GPS", а передан type_name = {type_name}')
@@ -530,7 +525,7 @@ class STM_ComPort(COM_Port_GUI):
     """
     Класс для управления платой STM32 через COM порт
     """
-    EndOfInitialSettings = pyqtSignal(str)
+    EndOfInitialSettings = pyqtSignal()
 
     def __init__(self, printer: Printing):
         super().__init__(printer, "STM")
@@ -544,7 +539,8 @@ class STM_ComPort(COM_Port_GUI):
 
     def stopInitialSettings(self):
         self._stop_Processes()
-        self.printer.printing('Конец выставки датчиков')
+        self.printer.printing('Конец выставки датчиков\n'
+                              '#######################')
 
     def startMeasuring(self, com_port_name: str, saving_path: str, template_name: str, data_type: str):
         self.portName = com_port_name
@@ -558,7 +554,8 @@ class STM_ComPort(COM_Port_GUI):
         sleep(0.5)  # Для корректного завершения процесса
 
         self._stop_Processes()
-        self.printer.printing('Конец чтения данных')
+        self.printer.printing('Конец чтения данных\n'
+                              '#######################')
 
     ##############################################
     def _checking_DecodedData(self):

@@ -1,6 +1,6 @@
 from PyQt5.QtCore import QObject, pyqtSignal
 import logging
-from pprint import pprint
+
 
 class Printing(QObject):
     NewText_Signal = pyqtSignal(str)
@@ -26,7 +26,7 @@ class Printing(QObject):
         """
         if text != '':
             self.NewText_Signal.emit(text)
-            pprint(text)
+            # pprint(text)
 
         if log_text == '':
             return

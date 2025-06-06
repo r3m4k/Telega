@@ -2,6 +2,7 @@
 
 import os
 
-
-# CWD = os.getcwd()
-CWD = "D:/Job/Telega"
+if os.name == 'nt':  # sys.platform == 'win32':
+    CWD = "D:/Job/Telega"
+elif os.name == 'posix':
+    CWD = os.getcwd()

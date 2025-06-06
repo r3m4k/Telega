@@ -1,21 +1,17 @@
-import numpy as np
+# PyQt imports
 from PyQt5.QtGui import QIcon
 from PyQt5.uic import loadUi
-from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QLabel, QProgressBar, QPushButton, QFileDialog, QGridLayout, QMessageBox
-from PyQt5.QtCore import QObject, pyqtSignal, QEvent, Qt
-from PyQt5 import QtCore
-import pyqtgraph as pg
+from PyQt5.QtWidgets import  QMainWindow, QFileDialog, QMessageBox
+from PyQt5.QtCore import pyqtSignal, Qt
 
+# system imports
 import json
-from pprint import pprint, pformat
-from random import random
 from datetime import date
-from time import sleep
-from threading import Thread
 
+# User imports
 from consts import CWD
 from message import message
-from com_port import COM_Port_GUI, get_ComPorts, STM_ComPort, GPS_ComPort
+from com_port import get_ComPorts, STM_ComPort, GPS_ComPort
 from printing import Printing
 
 
@@ -43,15 +39,6 @@ List = 0; Help_Button = 1; UpdateButton = 2
 # Индексы для SavingSetting_Widgets
 Dir = 0; FileName = 1
 LineEdit = 0
-
-# # Параметры для графиков
-# titles = ["Acc_X", "Acc_Y", "Acc_Z", "Gyro_X", "Gyro_Y", "Gyro_Z"]
-# colors = [["#1F77B4", "#D62728", "#2CA02C"],
-#           ["#17BECF", "#FF7F0E", "#9467BD"]]
-# y_labels = [["Acc_X, m/s**2", "Acc_Y, m/s**2", "Acc_Z, m/s**2"],
-#             ["Gyro_X, mdps", "Gyro_Y, mdps", "Gyro_Z, mdps"]]
-# MAX_X_LENGTH = 32       # Максимальное количество точек на графиках
-# PERIOD = 0.25           # Период получения данных с платы STM
 
 
 class DataCollectingWindow(QMainWindow):
@@ -88,15 +75,6 @@ class DataCollectingWindow(QMainWindow):
         self.PassageNum_Widget.setText(f'№ {self.PassageNum}')
         self.GPS_CheckBox.setChecked(True)
         #-------------------
-
-        # Настройка графиков
-        # self.pens = [[pg.mkPen(colors[data][axis], width=2) for axis in [X, Y, Z]] for data in [Acc, Gyro]]
-        # self.lines = [[self.Plots[data][axis].plot() for axis in [X, Y, Z]] for data in [Acc, Gyro]]
-        # self.x_index = 0
-        # self.x_array = np.arange(0, MAX_X_LENGTH * PERIOD, PERIOD)
-        # self.plot_values = {"Acc_X": np.zeros_like(self.x_array), "Acc_Y": np.zeros_like(self.x_array), "Acc_Z": np.zeros_like(self.x_array),
-        #                     "Gyro_X": np.zeros_like(self.x_array), "Gyro_Y": np.zeros_like(self.x_array), "Gyro_Z": np.zeros_like(self.x_array)}
-
         # Создадим нужные экземпляры классов
         self.printer = Printing()
         self.STM_ComPort = STM_ComPort(self.printer)
@@ -159,7 +137,6 @@ class DataCollectingWindow(QMainWindow):
                 pass
 
     def update_STMData(self, values: dir):
-        # self.update_Plots(values)
         self.update_Values(values)
 
     def update_GPSData(self, values: dir):
@@ -236,9 +213,6 @@ class DataCollectingWindow(QMainWindow):
     def start_InitialSetting(self):
         self.update_logger()
 
-        # Сбросим накопленные данные
-        # self.x_index = 0    # Индекс полученного пакета данных
-
         # Запуск чтения данных с платы STM
         if self.STM_Settings[List].currentText() == '-----':
             message('Выберите корректный COM порт для STM', icon='Warning')
@@ -260,9 +234,6 @@ class DataCollectingWindow(QMainWindow):
     def start_Measuring(self):
         self.update_logger()
         self.PassageNum_Widget.setText(f'№ {self.PassageNum}')
-
-        # Сбросим накопленные данные
-        # self.x_index = 0    # Индекс полученного пакета данных
 
         # Проверим корректность подключения платы STM
         if self.STM_Settings[List].currentText() == '-----':
@@ -337,46 +308,6 @@ class DataCollectingWindow(QMainWindow):
             self.printer.printing(text='GPS модуль не подключён!')
             self.GPS_Settings[List].setCurrentIndex(self.STM_Settings[List].findText('-----'))
             self.UsingGps_Flag = False
-
-    ####### Функционал для self.Plot_Widget #######
-    # def init_Plots(self):
-    #     for data in [Acc, Gyro]:
-    #         for axis in [X, Y, Z]:
-    #             self.Plots[data][axis].setBackground("w")
-    #             self.Plots[data][axis].showGrid(x=True, y=True)
-    #             plot_style = {"color": "grey", "font-size": "14px"}
-    #             self.Plots[data][axis].setLabel("left", y_labels[data][axis], **plot_style)
-    #             if axis == Z:
-    #                 self.Plots[data][axis].setLabel("bottom", "Time, seconds", **plot_style)
-    #
-    #             self.lines[data][axis] = self.Plots[data][axis].plot(self.x_array, self.plot_values[titles[3 * data + axis]], pen=self.pens[data][axis])
-    #
-    # def update_Plots(self, values: dir):
-    #     if self.x_index < MAX_X_LENGTH:
-    #         self.x_array[self.x_index] = values["Time"]
-    #         for title in titles:
-    #             self.plot_values[title][self.x_index] = values[title]
-    #
-    #         # Если получили первую посылку данных, то выровняем графики
-    #         if self.x_index == 0:
-    #             self.x_array = np.arange(values["Time"], values["Time"] + MAX_X_LENGTH * PERIOD, PERIOD)
-    #             for data in [Acc, Gyro]:
-    #                 for axis in [X, Y, Z]:
-    #                     for index in range(1, len(self.x_array)):
-    #                         self.plot_values[titles[3 * data + axis]][index] = self.plot_values[titles[3 * data + axis]][0]
-    #
-    #         self.x_index += 1
-    #
-    #     else:
-    #         self.x_array = self.x_array[1:]
-    #         self.x_array = np.append(self.x_array, values["Time"])
-    #         for title in titles:
-    #             self.plot_values[title] = self.plot_values[title][1:]
-    #             self.plot_values[title] = np.append(self.plot_values[title], values[title])
-    #
-    #     for data in [Acc, Gyro]:
-    #         for axis in [X, Y, Z]:
-    #             self.lines[data][axis].setData(self.x_array, self.plot_values[titles[3 * data + axis]])
 
     ####### Функционал для self.Sensor_Values #######
     def init_Values(self):
