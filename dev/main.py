@@ -53,11 +53,13 @@ class MainWindow(QMainWindow):
         self.WindowsCounter[1] -= 1
 
     def closeEvent(self, event):
+        self.data_collecting_window.closeEvent(event)
+        self.data_processing_window.closeEvent(event)
         QApplication.closeAllWindows()
         event.accept()
 
 if __name__ == "__main__":
-    freeze_support()    # Для корректной работы межпроцессорного взаимодействия
+    freeze_support()
     app = QApplication(argv)
     window = MainWindow()
     window.show()

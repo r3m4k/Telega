@@ -9,13 +9,13 @@ def message(text, icon='NoIcon'):
     QtIcon: QMessageBox
     if icon == 'NoIcon':
         QtIcon = QMessageBox.NoIcon
-    elif icon == ('Warning' or '!'):
+    elif icon in ['Warning', '!']:
         QtIcon = QMessageBox.Warning
-    elif icon == ('Information' or 'Info' or 'i'):
+    elif icon in ['Information', 'Info', 'i']:
         QtIcon = QMessageBox.Information
-    elif icon == ('Question' or '?'):
+    elif icon in ['Question', '?']:
         QtIcon = QMessageBox.Question
-    elif icon == ('Critical' or 'error'):
+    elif icon in ['Critical', 'error']:
         QtIcon = QMessageBox.Critical
     else:
         raise RuntimeError('Неправильно передан параметр icon')
