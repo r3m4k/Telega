@@ -47,10 +47,10 @@ class MyManager(BaseManager):
 class COM_Port:
     # Формат команд: 2 байта - заголовок, 1 байт - формат посылки, 2 байта - команда, 1 байт - контрольная сумма
     commands = {
+        "restart":                 bytes([0x7e, 0xe7, 0xff, 0xff, 0x00, 0x2c]),
         "start_InitialSetting":    bytes([0x7e, 0xe7, 0xff, 0xab, 0xba, 0xc9]),
         "start_Measuring":         bytes([0x7e, 0xe7, 0xff, 0xbc, 0xcb, 0xeb]),
         "stop_Measuring":          bytes([0x7e, 0xe7, 0xff, 0xcd, 0xdc, 0x0d]),
-        "stop_CollectingData":     bytes([0x7e, 0xe7, 0xff, 0xde, 0xed, 0x2f])
     }
 
     received_msg = {
@@ -396,7 +396,7 @@ class COM_Port_GUI(QObject):
                                             # И равен False после self.stopMeasuring
         self.portName = ''                  # Имя COM порта
         self.savingFileName = ''            # Имя файла, куда будут сохраняться данные из COM порта
-        self.isProcessesActive = False      # Флаг работы процессов
+        self.areProcessesActive = False     # Флаг работы процессов
 
         self.manager = MyManager()
         try:
@@ -432,8 +432,8 @@ class COM_Port_GUI(QObject):
         """
         self.processingFlag = True
 
-        if not self.isProcessesActive:
-            self.isProcessesActive = True
+        if not self.areProcessesActive:
+            self.areProcessesActive = True
 
             # По новой инициализируем все процессы для корректного запуска при повторном вызове функции
             self.ComPort_ReadingProcess = Process(target=self.ComPort.startMeasuring,
@@ -455,9 +455,9 @@ class COM_Port_GUI(QObject):
         """
         Остановка процессов
         """
-        if self.isProcessesActive:
+        if self.areProcessesActive:
             # Если процессы активны
-            self.isProcessesActive = False
+            self.areProcessesActive = False
             try:
 
                 self.ComPort_ReadingProcess.terminate()
@@ -556,6 +556,20 @@ class STM_ComPort(COM_Port_GUI):
         self._stop_Processes()
         self.printer.printing('Конец чтения данных\n'
                               '#######################')
+
+    def restart(self):
+        if self.areProcessesActive:
+            # Если процессы работы с платой активны, то пошлём команду на перезапуск
+            self.gui_connection.send('Command__restart')
+        else:
+            # Если процессы не созданы, то создадим его с первоначальной командой на перезапуск
+            self._start_Processes('Command__restart')
+
+        sleep(0.5)  # Для корректного завершения процессов
+        self._stop_Processes()
+        self.printer.printing('Перезапуск платы\n'
+                              '#######################')
+
 
     ##############################################
     def _checking_DecodedData(self):
