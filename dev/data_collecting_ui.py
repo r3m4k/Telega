@@ -23,6 +23,7 @@ Start_InitialSetting = 0
 Start_Measuring = 1
 Stop_Measuring = 2
 Get_Coordinates = 3
+Restart_STM = 4
 
 # Индексы осей
 X = 0; Y = 1; Z = 2
@@ -62,7 +63,6 @@ class DataCollectingWindow(QMainWindow):
 
         # Настройка виджетов
         self.Command_Buttons = [self.ui.Buttons.itemAt(i).widget() for i in range(4)]
-        # self.Plots = [[self.ui.Plot_Widget.itemAtPosition(row, column).widget() for row in range(1, 4)] for column in range(2)]
         self.Sensor_Values = [[self.ui.Values_Widget.itemAtPosition(row, column).widget() for row in range(3)] for column in range(1, 4, 2)]
         self.Saving_Params = [[self.ui.SavingSettings_Widget.itemAtPosition(row, column).widget() for column in range(1, 3)] for row in range(2)]
         self.STM_Settings = [self.ui.COM_Port_STM_Settings.itemAt(i).widget() for i in range(1, 4)]
@@ -96,7 +96,6 @@ class DataCollectingWindow(QMainWindow):
 
     def init_UI(self):
         self.init_Buttons()
-        # self.init_Plots()
         self.init_Values()
         self.init_SavingSettings()
         self.init_STM_Settings()
@@ -207,6 +206,7 @@ class DataCollectingWindow(QMainWindow):
         self.Command_Buttons[Start_Measuring].clicked.connect(self.start_Measuring)
         self.Command_Buttons[Stop_Measuring].clicked.connect(self.stop_Measuring)
         self.Command_Buttons[Get_Coordinates].clicked.connect(self.get_Coordinates)
+        # self.Command_Buttons[Restart_STM].clicked.connect(self.restart_STM)
 
         self.Command_Buttons[Stop_Measuring].setEnabled(False)
 
@@ -228,8 +228,6 @@ class DataCollectingWindow(QMainWindow):
             saving_path=self.Saving_Params[Dir][LineEdit].text(),
             template_name=self.Saving_Params[FileName][LineEdit].text(),
         )
-
-    # Такой кнопки нет, но всё равно разместим эту функцию в этой части кода
 
     def start_Measuring(self):
         self.update_logger()
@@ -308,6 +306,16 @@ class DataCollectingWindow(QMainWindow):
             self.printer.printing(text='GPS модуль не подключён!')
             self.GPS_Settings[List].setCurrentIndex(self.STM_Settings[List].findText('-----'))
             self.UsingGps_Flag = False
+
+    def restart_STM(self):
+        self.unblockInputs()
+
+        self.Command_Buttons[Stop_Measuring].setEnabled(True)
+        self.Command_Buttons[Get_Coordinates].setEnabled(True)
+
+        self.STM_ComPort.restart()
+
+        self.Command_Buttons[Stop_Measuring].setEnabled(False)
 
     ####### Функционал для self.Sensor_Values #######
     def init_Values(self):
