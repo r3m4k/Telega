@@ -47,7 +47,7 @@ class MyManager(BaseManager):
 class COM_Port:
     # Формат команд: 2 байта - заголовок, 1 байт - формат посылки, 2 байта - команда, 1 байт - контрольная сумма
     commands = {
-        "restart":                 bytes([0x7e, 0xe7, 0xff, 0xff, 0x00, 0x2c]),
+        "restart":                 bytes([0x7e, 0xe7, 0xff, 0xff, 0x00, 0x63]),
         "start_InitialSetting":    bytes([0x7e, 0xe7, 0xff, 0xab, 0xba, 0xc9]),
         "start_Measuring":         bytes([0x7e, 0xe7, 0xff, 0xbc, 0xcb, 0xeb]),
         "stop_Measuring":          bytes([0x7e, 0xe7, 0xff, 0xcd, 0xdc, 0x0d]),
@@ -565,11 +565,10 @@ class STM_ComPort(COM_Port_GUI):
             # Если процессы не созданы, то создадим его с первоначальной командой на перезапуск
             self._start_Processes('Command__restart')
 
-        sleep(0.5)  # Для корректного завершения процессов
-        self._stop_Processes()
+        sleep(1)  # Для корректного завершения процессов
+        # self._stop_Processes()
         self.printer.printing('Перезапуск платы\n'
                               '#######################')
-
 
     ##############################################
     def _checking_DecodedData(self):
