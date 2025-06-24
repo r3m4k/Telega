@@ -7,6 +7,8 @@ from PyQt5.QtCore import pyqtSignal, Qt
 # system imports
 import json
 from datetime import date
+from threading import Thread
+from time import sleep
 
 # User imports
 from consts import CWD
@@ -41,6 +43,9 @@ List = 0; Help_Button = 1; UpdateButton = 2
 Dir = 0; FileName = 1
 LineEdit = 0
 
+# Состояния checkBox
+CheckBoxStates = [Qt.CheckState.PartiallyChecked, Qt.CheckState.Checked, Qt.CheckState.Unchecked]
+
 
 class DataCollectingWindow(QMainWindow):
 
@@ -71,6 +76,7 @@ class DataCollectingWindow(QMainWindow):
         self.Longitude_Value = self.ui.Longitude_Value
         self.PassageNum_Widget = self.ui.Passage_Num
         self.GPS_CheckBox = self.ui.GPScheckBox
+        self.Indicator = self.ui.Indicator
         #-------------------
         self.PassageNum_Widget.setText(f'№ {self.PassageNum}')
         self.GPS_CheckBox.setChecked(True)
@@ -100,6 +106,7 @@ class DataCollectingWindow(QMainWindow):
         self.init_SavingSettings()
         self.init_STM_Settings()
         self.init_GPS_Settings()
+        self.init_Indicator()
 
     def closeEvent(self, event):
         self.DataCollectingWindow_Closed.emit()
@@ -394,6 +401,20 @@ class DataCollectingWindow(QMainWindow):
         com_ports = get_ComPorts()
         self.GPS_Settings[List].clear()
         self.GPS_Settings[List].addItems(com_ports)
+
+    ####### Функционал для self.Indicator #######
+    def init_Indicator(self):
+        self.Indicator.setTristate(True)
+        Thread(target=self.operation_indicator, args=(), daemon=True).start()
+
+    def operation_indicator(self):
+        time_sleep = 0.6
+        state_index = 0
+        states_num = len(CheckBoxStates)
+        while True:
+            self.Indicator.setCheckState(CheckBoxStates[state_index])
+            state_index = (state_index + 1) % states_num
+            sleep(time_sleep)
 
     ####### Дополнительный функционал #######
     def end_of_initialSetting(self):
