@@ -62,7 +62,7 @@ class DataCollectingWindow(QMainWindow):
             self.json_data = json.load(json_file)
 
         # Настройка виджетов
-        self.Command_Buttons = [self.ui.Buttons.itemAt(i).widget() for i in range(4)]
+        self.Command_Buttons = [self.ui.Buttons.itemAt(i).widget() for i in range(5)]
         self.Sensor_Values = [[self.ui.Values_Widget.itemAtPosition(row, column).widget() for row in range(3)] for column in range(1, 4, 2)]
         self.Saving_Params = [[self.ui.SavingSettings_Widget.itemAtPosition(row, column).widget() for column in range(1, 3)] for row in range(2)]
         self.STM_Settings = [self.ui.COM_Port_STM_Settings.itemAt(i).widget() for i in range(1, 4)]
@@ -206,7 +206,7 @@ class DataCollectingWindow(QMainWindow):
         self.Command_Buttons[Start_Measuring].clicked.connect(self.start_Measuring)
         self.Command_Buttons[Stop_Measuring].clicked.connect(self.stop_Measuring)
         self.Command_Buttons[Get_Coordinates].clicked.connect(self.get_Coordinates)
-        # self.Command_Buttons[Restart_STM].clicked.connect(self.restart_STM)
+        self.Command_Buttons[Restart_STM].clicked.connect(self.restart_STM)
 
         self.Command_Buttons[Stop_Measuring].setEnabled(False)
 
