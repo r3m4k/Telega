@@ -404,6 +404,7 @@ class DataCollectingWindow(QMainWindow):
 
     ####### Функционал для self.Indicator #######
     def init_Indicator(self):
+        self.Indicator.setEnabled(False)
         self.Indicator.setTristate(True)
         Thread(target=self.operation_indicator, args=(), daemon=True).start()
 
