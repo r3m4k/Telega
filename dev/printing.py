@@ -32,6 +32,8 @@ class Printing(QObject):
             return
 
         match log_level:
+            case 'Debug':
+                self.logger.debug(log_text)
             case 'Info':
                 self.logger.info(log_text)
             case 'Warning':

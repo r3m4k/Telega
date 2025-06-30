@@ -1,4 +1,5 @@
 import os
+from logging import raiseExceptions
 from time import sleep
 import binascii
 import traceback
@@ -8,6 +9,7 @@ from threading import Thread
 from multiprocessing import Process, Queue, Pipe
 from multiprocessing.managers import BaseManager, NamespaceProxy
 from multiprocessing.context import ProcessError
+from typing import Callable
 
 if os.name == 'nt':  # sys.platform == 'win32':
     from serial.tools.list_ports_windows import comports
@@ -64,9 +66,9 @@ class COM_Port:
     def __del__(self):
         self.port.close()
 
-    def startMeasuring(self, com_port_name: str, baudrate: int,
-                       data_queue: Queue, command_pipe: Pipe, msg_queue: Queue,
-                       command = ''):
+    def startProcess(self, com_port_name: str, baudrate: int,
+                     data_queue: Queue, command_pipe: Pipe, msg_queue: Queue,
+                     command = ''):
 
         # При возникновении любого неучтённого исключения перенаправим его в self.msg_queue
         try:
@@ -81,7 +83,8 @@ class COM_Port:
             try:
                 if command != '':
                     # Отправим команду по COM порту
-                    if not self.decode_Command(command, msg_queue):
+                    sending_status, command_function = self.decode_Command(command, msg_queue)
+                    if not sending_status:
                         return
 
             except serial.serialutil.SerialException or RuntimeError:
@@ -89,34 +92,48 @@ class COM_Port:
                 msg_queue.put(f'Error__Ошибка отправки команды по {com_port_name}')
                 return
 
-            # Начнём чтение данных
-            msg_queue.put(f'Info__Начало чтения данных из {self.port.port}')
-            try:
-                self.reading_ComPort(data_queue, command_pipe, msg_queue)
-            except SerialException:
-                msg_queue.put(f'Warning__{traceback.format_exc()}')
-                msg_queue.put(f'Error__Ошибка чтения порта {self.port.port}')
+            command_function(data_queue, command_pipe, msg_queue)
+
 
         except Exception as error:
             msg_queue.put(f'Critical__\n{error}\n{traceback.format_exc()}')
 
     def reading_ComPort(self, data_queue: Queue, command_pipe: Pipe, msg_queue: Queue):
-        while True:
-            if not command_pipe.poll():
-                # Если нет поступивших команд, то читаем данные из СOM порта
-                data_queue.put(self.port.read(1))
-            else:
-                _ = self.decode_Command(str(command_pipe.recv()), msg_queue)
-                break   # Остановим чтение из com порта
+        # Начнём чтение данных
+        msg_queue.put(f'Info__Начало чтения данных из {self.port.port}')
+        try:
+            while True:
+                if not command_pipe.poll():
+                    # Если нет поступивших команд, то читаем данные из СOM порта
+                    data_queue.put(self.port.read(1))
+                else:
+                    _ = self.decode_Command(str(command_pipe.recv()), msg_queue)
+                    break  # Остановим чтение из com порта
 
+        except SerialException:
+            msg_queue.put(f'Warning__{traceback.format_exc()}')
+            msg_queue.put(f'Error__Ошибка чтения порта {self.port.port}')
 
-    def decode_Command(self, command: str, msg_queue: Queue):
+    def decode_Command(self, command: str, msg_queue: Queue) -> (bool, Callable):
+        sending_status = False
         try:
             receive_command = command.split('__')[1]
             if receive_command in self.commands:
-                return self.send_Command(receive_command, msg_queue)
+                sending_status = self.send_Command(receive_command, msg_queue)
             else:
                 msg_queue.put(f'Warning__Команда не распознана')
+                return sending_status, self.foo_function
+
+            match receive_command:
+                case 'restart':
+                    return sending_status, self.foo_function
+                case 'start_Measuring':
+                    return sending_status, self.reading_ComPort
+                case 'start_InitialSetting':
+                    return sending_status, self.reading_ComPort
+                case _:
+                    return False, self.foo_function
+
 
         except Exception:
             msg_queue.put(f'Warning__Неправильно передана команда {command}')
@@ -142,6 +159,11 @@ class COM_Port:
 
         return status
 
+    def foo_function(self, data_queue: Queue, command_pipe: Pipe, msg_queue: Queue):
+        self.port.close()
+        msg_queue.put('Debug__Doing foo_function')
+        while True:
+            sleep(0.5)
 
 class Decoder:
     STM_Stages = enum.Enum(
@@ -189,7 +211,7 @@ class Decoder:
             try:
                 val = int(binascii.hexlify(bt), 16)
             except ValueError:
-                msg_queue.put(f'Warning__{traceback.format_exc()}')
+                # msg_queue.put(f'Warning__{traceback.format_exc()}')
                 continue
 
             match stage:
@@ -436,7 +458,7 @@ class COM_Port_GUI(QObject):
             self.areProcessesActive = True
 
             # По новой инициализируем все процессы для корректного запуска при повторном вызове функции
-            self.ComPort_ReadingProcess = Process(target=self.ComPort.startMeasuring,
+            self.ComPort_ReadingProcess = Process(target=self.ComPort.startProcess,
                                                   args=(self.portName, BAUDRATE[self.type_port], self.ComPort_Data, self.hardware_connection, self.MessageQueue, command, ),
                                                   daemon=True)
             self.ComPort_DecodingProcess = Process(target=self.Decoder.decoding,
@@ -565,8 +587,8 @@ class STM_ComPort(COM_Port_GUI):
             # Если процессы не созданы, то создадим его с первоначальной командой на перезапуск
             self._start_Processes('Command__restart')
 
-        sleep(1)  # Для корректного завершения процессов
-        # self._stop_Processes()
+        sleep(0.4)  # Для корректного завершения процессов
+        self._stop_Processes()
         self.printer.printing('Перезапуск платы\n'
                               '#######################')
 
