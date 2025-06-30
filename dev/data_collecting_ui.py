@@ -1,25 +1,21 @@
 # PyQt imports
-import os.path
-
 from PyQt5.QtGui import QIcon
 from PyQt5.uic import loadUi
 from PyQt5.QtWidgets import  QMainWindow, QFileDialog, QMessageBox
 from PyQt5.QtCore import pyqtSignal, Qt
 
 # system imports
+import os
 import json
 from datetime import date
 from threading import Thread
 from time import sleep
 
 # User imports
-from consts import CWD
+from consts import CWD, JSON_FILE
 from message import message
 from com_port import get_ComPorts, STM_ComPort, GPS_ComPort
 from printing import Printing
-
-
-JSON_FILE = f'{CWD}/dev/history.json'
 
 
 # Индексы для Buttons
