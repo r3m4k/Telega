@@ -1,0 +1,11 @@
+{
+  "DataCollecting": {
+    "dir": "D:/Job/Telega/test"
+  },
+
+  "Decoder": {
+    "header": [126, 231],
+    "titles" :  ["Time", "Acc_X", "Acc_Y", "Acc_Z", "Gyro_X", "Gyro_Y", "Gyro_Z", "Temp"],
+    "value_coefficients": [0.25, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.01]
+  }
+}
