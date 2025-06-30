@@ -1,4 +1,6 @@
 # PyQt imports
+import os.path
+
 from PyQt5.QtGui import QIcon
 from PyQt5.uic import loadUi
 from PyQt5.QtWidgets import  QMainWindow, QFileDialog, QMessageBox
@@ -335,7 +337,8 @@ class DataCollectingWindow(QMainWindow):
     ####### Функционал для self.SavingSettings_Widget #######
     def init_SavingSettings(self):
         try:
-            self.Saving_Params[Dir][LineEdit].setText(self.json_data["DataCollecting"]["dir"])
+            if os.path.exists(self.json_data["DataCollecting"]["dir"]):
+                self.Saving_Params[Dir][LineEdit].setText(self.json_data["DataCollecting"]["dir"])
         except Exception:
             pass
 
