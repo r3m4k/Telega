@@ -3,7 +3,6 @@ import os
 import json
 from enum import Enum
 import binascii
-from operator import index
 from typing import BinaryIO, Tuple, Sequence, Union, cast, Any
 from pprint import pprint
 
@@ -15,33 +14,9 @@ from matplotlib.axes import Axes
 
 # User imports
 from consts import CWD, JSON_FILE
-
-##########################################################
-
-class DataProcessing:
-    """
-    Класс для чтения данных из файлов, собранных во время поезди с телегой
-    """
-    def __init__(self, data_dir: str, file_list: list):
-        self._data_dir = data_dir        # Директория, в которой находятся файлы
-        self._file_list = file_list      # Список обрабатываемых файлов
-
-        self._received_data = {}         # Переменная для хранения прочитанных данных
-
-    def get_data(self):
-        return self._received_data
-
-    def create_plots(self, filename):
-        """
-        Создание графиков данных, прочитанных из файла file_name
-        """
-        pass
-
-    def _decoder(self):
-        pass
-
-    def _reading_file(self):
-        pass
+from dev.consts import color_scheme
+import filterpy.kalman
+import filterpy.common
 
 ##########################################################
 
@@ -192,6 +167,11 @@ class Canvas:
     """
     Класс для создания графиков и для работы с ними.
     Пример использования:
+
+        import numpy as np
+        import matplotlib.pyplot as plt
+        from reading_data import Canvas
+
         x_data = np.linspace(0, 2 * np.pi)
         x_data_x2 = np.linspace(0, 4 * np.pi)
 
@@ -248,7 +228,7 @@ class Canvas:
     def suptitle(self, text, **kwargs):
         self.fig.suptitle(text, **kwargs)
 
-    def axis_titles(self, titles: str | list, **text_kwargs):
+    def set_axis_titles(self, titles: str | list, **text_kwargs):
         for n_row in range(self._nrows):
             for n_col in range(self._ncols):
 
@@ -328,13 +308,13 @@ class Canvas:
                     ax = cast(Axes, self.ax[n_row])
                     if x_label:
                         # Если передали только одно значение x_label, то подпишем только нижнюю ось
-                        if len(x_label) == 1:
-                            if n_col == self._ncols - 1:
+                        if isinstance(x_label, str):
+                            if n_row == self._nrows - 1:
                                 ax.set_xlabel(x_label, **text_kwargs)
                         else:
-                            ax.set_xlabel(x_label[n_col], **text_kwargs)
+                            ax.set_xlabel(x_label[n_row], **text_kwargs)
                     if y_label:
-                        ax.set_ylabel(y_label, **text_kwargs)
+                        ax.set_ylabel(y_label[n_row], **text_kwargs)
 
                 # Если несколько рядов и колонок графиков
                 else:
@@ -356,10 +336,10 @@ class Canvas:
 
         _x_axis_array = np.array(x_axis)
         _plot_data_array = np.array(plot_data)
-        axis_kwargs = {}
 
         for n_row in range(self._nrows):
             for n_col in range(self._ncols):
+                axis_kwargs = {}
 
                 # Если только один график
                 if (self._nrows == 1) and (self._ncols == 1):
@@ -426,14 +406,152 @@ class Canvas:
                     else:
                         ax.plot(_x_axis_array[n_row, n_col], _plot_data_array[n_row, n_col], **axis_kwargs, **line_kwargs)
 
-                ax.legend()
-
-class Plotting_3axes(Canvas):
-    """
-    Класс для создания графиков величин, имеющие 3 координаты
-    """
-    def __init__(self, *canvas_args, **canvas_kwargs):
-        super().__init__(n_rows=3, n_cols=1, *canvas_args, **canvas_kwargs)
+                if "label" in axis_kwargs.keys():
+                    if axis_kwargs["label"]:
+                        ax.legend()
 
 ##########################################################
 
+class KalmanFilter:
+    """
+    Класс для фильтрации данных с помощью фильтра Калмана
+    """
+    def __init__(self, data: np.typing.NDArray, initial_state: float):
+        self._data = data
+        self._initial_state = initial_state
+        self._filtered_data: np.typing.NDArray = None
+
+    def get_filtered_data(self):
+        self._filtering()
+        return self._filtered_data
+
+    def _filtering(self):
+        # Создаём объект KalmanFilter
+        flt = filterpy.kalman.KalmanFilter(dim_x=1,  # Размер вектора состояния
+                                            dim_z=1)  # Размер вектора измерений
+
+        processNoise = 1e-4                     # Погрешность модели
+        measurementSigma = np.std(self._data)   # Среднеквадратичное отклонение
+
+        # F - матрица процесса - размер dim_x на dim_x - 1х1
+        flt.F = np.array([[1.0]])
+
+        # Матрица наблюдения - dim_z на dim_x - 1x1
+        flt.H = np.array([[1.0]])
+
+        # Ковариационная матрица ошибки модели
+        flt.Q = processNoise
+
+        # Ковариационная матрица ошибки измерения - 1х1
+        flt.R = np.array([[measurementSigma * measurementSigma]])
+
+        # Начальное состояние.
+        flt.x = np.array([self._initial_state])
+
+        # Ковариационная матрица для начального состояния
+        flt.P = np.array([[8.0]])
+
+        filteredState = []
+        # stateCovarianceHistory = []
+
+        # Обработка данных
+        for i in range(len(self._data)):
+            z = [self._data[i]]  # Вектор измерений
+            flt.predict()  # Этап предсказания
+            flt.update(z)  # Этап коррекции
+
+            filteredState.append(flt.x)
+            # stateCovarianceHistory.append(flt.P)
+
+        self._filtered_data = np.array(filteredState)
+        # stateCovarianceHistory = np.array(stateCovarianceHistory)
+
+##########################################################
+
+class DataProcessing:
+    """
+    Класс для чтения данных из файлов, собранных во время поезди с телегой
+    """
+    def __init__(self, data_dir: str, file_list: list):
+        self._data_dir = data_dir        # Директория, в которой находятся файлы
+        self._file_list = file_list      # Список обрабатываемых файлов
+
+        self._received_data = {}         # Переменная для хранения прочитанных данных
+
+    def start(self):
+        for filename in self._file_list:
+            decoder = Decoder(f'{self._data_dir}/{filename}')
+            decoder.decoding()
+            self._received_data[filename] = decoder.get_data()
+
+    def get_data(self):
+        return self._received_data
+
+    def plotting_raw_data(self):
+        """
+        Создание графиков исходных данных, прочитанных из файла file_name
+        """
+        for filename in self._file_list:
+            file_data = self._received_data[filename]
+
+            # Построение графиков температуры и абсолютных величин ускорения и угловых скоростей
+            canvas_Abs = Canvas(n_rows=3, n_cols=1)
+            canvas_Abs.suptitle(f'Величины температуры и абсолютных величин ускорения и угловых скоростей из файла {filename}', weight='bold')
+            canvas_Abs.plot(file_data['Time'] / 60,
+                            [np.sqrt(file_data[f'Acc_X'] ** 2 + file_data[f'Acc_Y'] ** 2 + file_data[f'Acc_Z'] ** 2),
+                             np.sqrt(file_data[f'Gyro_X'] ** 2 + file_data[f'Gyro_Y'] ** 2 + file_data[f'Gyro_Z'] ** 2),
+                             file_data['Temp']],
+                            color_names=[color_scheme['ABS_values']['Acc'],
+                                         color_scheme['ABS_values']['Gyro'],
+                                         color_scheme['ABS_values']['Temp']])
+            canvas_Abs.grid_all_axes()
+            canvas_Abs.set_axis_labels(x_label='Time, minutes',
+                                       y_label=['acceleration, m / c**2', 'angular velocity, mgps', 'temperature, ---'])
+            canvas_Abs.tight_layout()
+
+            # Построение графиков ускорений
+            canvas_Acc = Canvas(n_rows=3, n_cols=1)
+            canvas_Acc.suptitle(f'Величины ускорений из файла {filename}', weight='bold')
+            canvas_Acc.plot(file_data['Time'] / 60,
+                            [file_data[f'Acc_{coord}'] for coord in ['X', 'Y', 'Z']],
+                            label=['raw_data1', None, 'raw_data2'],
+                            color_names=[color_scheme['RGB_classic']['X'],
+                                         color_scheme['RGB_classic']['Y'],
+                                         color_scheme['RGB_classic']['Z']])
+            canvas_Acc.plot(file_data['Time'] / 60,
+                            [KalmanFilter(file_data[f'Acc_{coord}'], file_data[f'Acc_{coord}'][0]).get_filtered_data()
+                            for coord in ['X', 'Y', 'Z']],
+                            label=['filtered_data1', None, 'filtered_data2'],
+                            color_names=[color_scheme['RGB_dark']['X'],
+                                         color_scheme['RGB_dark']['Y'],
+                                         color_scheme['RGB_dark']['Z']],
+                            linewidth=2.5)
+            canvas_Acc.grid_all_axes()
+            canvas_Acc.set_axis_labels(x_label='Time, minutes',
+                                       y_label=[f'Acc_{coord}, m / c**2' for coord in ['X', 'Y', 'Z']])
+            canvas_Acc.tight_layout()
+
+            # Построение графиков угловых скоростей
+            canvas_Gyro = Canvas(n_rows=3, n_cols=1)
+            canvas_Gyro.suptitle(f'Величины угловых скоростей из файла {filename}', weight='bold')
+            canvas_Gyro.plot(file_data['Time'] / 60,
+                            [file_data[f'Gyro_{coord}'] for coord in ['X', 'Y', 'Z']],
+                             color_names=[color_scheme['COP_classic']['X'],
+                                          color_scheme['COP_classic']['Y'],
+                                          color_scheme['COP_classic']['Z']])
+
+            canvas_Gyro.grid_all_axes()
+            canvas_Gyro.set_axis_labels(x_label='Time, minutes',
+                                        y_label=[f'Gyro_{coord}, mgps'  for coord in ['X', 'Y', 'Z']])
+            canvas_Gyro.tight_layout()
+
+    def _reading_file(self):
+        pass
+
+##########################################################
+
+if __name__ == '__main__':
+    analyser = DataProcessing(f'{CWD}/10.06.25', ['telega_2025-06-10_STM_RawData_3.bin', ])
+    analyser.start()
+    analyser.plotting_raw_data()
+    plt.show()
