@@ -12,11 +12,13 @@ else:
 JSON_FILE = f'{CWD}/dev/settings.json'
 
 color_scheme = {
-            'RGB_classic': {'x': 'tab:blue', 'y': 'tab:red', 'z': 'tab:green'},
-            'RGB_dark': {'x': 'navy', 'y': 'maroon', 'z': 'darkgreen'},
-            'RGB_light': {'x': 'skyblue', 'y': 'coral', 'z': 'yellowgreen'},
+            'RGB_classic': {'X': 'tab:blue', 'Y': 'tab:red', 'Z': 'tab:green'},
+            'RGB_dark': {'X': 'navy', 'Y': 'maroon', 'Z': 'darkgreen'},
+            'RGB_light': {'X': 'skyblue', 'Y': 'coral', 'Z': 'yellowgreen'},
 
-            'COP_classic': {'x': 'tab:cyan', 'y': 'tab:orange', 'z': 'tab:purple'},
-            'COP_dark': {'x': 'steelblue', 'y': 'goldenrod', 'z': 'purple'},
-            'COP_light': {'x': 'lightblue', 'y': 'orange', 'z': 'hotpink'},
+            'COP_classic': {'X': 'tab:cyan', 'Y': 'tab:orange', 'Z': 'tab:purple'},
+            'COP_dark': {'X': 'steelblue', 'Y': 'goldenrod', 'Z': 'purple'},
+            'COP_light': {'X': 'lightblue', 'Y': 'orange', 'Z': 'hotpink'},
+
+            'ABS_values': {'Acc': 'goldenrod', 'Gyro': 'tab:purple', 'Temp': 'cyan'}
         }
