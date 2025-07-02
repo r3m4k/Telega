@@ -1,5 +1,4 @@
 import os
-from logging import raiseExceptions
 from time import sleep
 import binascii
 import traceback
@@ -32,7 +31,8 @@ from printing import Printing
 
 def get_ComPorts() -> dir:
     iterator = comports(include_links=False)
-    res = {'-----': {"desc": "Здесь будут отображаться дескриптор выбранного COM порта"}}
+    res = {'-----': {"desc": "Здесь будет отображаться дескриптор выбранного COM порта",
+                     "hwid": "Здесь будет отображаться hwid выбранного COM порта"}}
     for n, (_port, desc, hwid) in enumerate(iterator, 1):
         res[_port] = {"desc": desc, "hwid": hwid}
 

@@ -10,6 +10,7 @@ import json
 from datetime import date
 from threading import Thread
 from time import sleep
+from pprint import pprint
 
 # User imports
 from consts import CWD, JSON_FILE
@@ -114,7 +115,8 @@ class DataCollectingWindow(QMainWindow):
         self.GPS_ComPort.__del__()
 
         # Сохраним данные текущего использования в json файл
-        self.json_data["DataCollecting"]["dir"] = self.Saving_Params[Dir][LineEdit].text()      # Сохраним выбранный путь в json файл
+        self.json_data["DataCollecting"]["dir"] = self.Saving_Params[Dir][LineEdit].text()                              # Сохраним выбранный путь в json файл
+        self.json_data["DataCollecting"]["stm_hwid"] = get_ComPorts()[self.STM_Settings[List].currentText()]["hwid"]        # Сохраним hwid stm платы
         with open(JSON_FILE, 'w') as json_file:
             json.dump(self.json_data, json_file)
 
@@ -353,15 +355,20 @@ class DataCollectingWindow(QMainWindow):
     ####### Функционал для self.STM_Settings #######
     def init_STM_Settings(self):
         com_ports = get_ComPorts()
+        # pprint(com_ports)
         self.STM_Settings[List].addItems(com_ports)
 
-        # Зададим значение по умолчанию, если в дескрипторе есть 'STM'
+        # Зададим значение по умолчанию, если hwid одного из порта совпадает с self.json_data["DataCollecting"]["stm_hwid"]
+        # Если такого нет, то зададим значение по умолчанию, если в дескрипторе есть 'STM'
         for port in com_ports.keys():
-            if 'STM' in com_ports[port]['desc']:
+            if self.json_data["DataCollecting"]["stm_hwid"] in com_ports[port]['hwid']:
+                self.STM_Settings[List].setCurrentIndex(list(com_ports.keys()).index(port))
+            elif 'STM' in com_ports[port]['desc']:
                 self.STM_Settings[List].setCurrentIndex(list(com_ports.keys()).index(port))
 
         self.STM_Settings[Help_Button].clicked.connect(
-            lambda: message(get_ComPorts()[f'{self.STM_Settings[List].currentText()}']["desc"],
+            lambda: message(f"{com_ports[f'{self.STM_Settings[List].currentText()}']["desc"]}\n\n"
+                            f"{com_ports[f'{self.STM_Settings[List].currentText()}']["hwid"]}",
                             icon='Information')
         )
 
@@ -389,7 +396,8 @@ class DataCollectingWindow(QMainWindow):
                 self.GPS_Settings[List].setCurrentIndex(list(com_ports.keys()).index(port))
 
         self.GPS_Settings[Help_Button].clicked.connect(
-            lambda: message(get_ComPorts()[f'{self.GPS_Settings[List].currentText()}']["desc"],
+            lambda: message(f"{com_ports[f'{self.GPS_Settings[List].currentText()}']["desc"]}\n\n"
+                            f"{com_ports[f'{self.GPS_Settings[List].currentText()}']["hwid"]}",
                             icon='Information')
         )
 

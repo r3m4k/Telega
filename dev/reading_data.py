@@ -171,13 +171,13 @@ class Decoder:
 
     def _list_to_dict(self, buffer_list: list[bytes]):
         buffer_index = 0
-        for index in range(len(self._titles)):
+        for i in range(len(self._titles)):
 
             if buffer_index > self._package_size:
                 raise RuntimeError(f'Unsupported package size')
 
-            key = self._titles[index]
-            multiplier = self._coefficients[index]
+            key = self._titles[i]
+            multiplier = self._coefficients[i]
 
             self._received_data[key] = np.append(
                 self._received_data[key],
@@ -227,6 +227,7 @@ class Canvas:
                       label=[None, 'cos(x)'])
 
         plt.show()
+        
     """
 
     def __init__(self, fig_height=9, fig_width=16, n_rows=1, n_cols=1, *ax_args, **ax_kwargs):
