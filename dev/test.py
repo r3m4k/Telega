@@ -5,9 +5,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from pprint import pprint
 
-import numpy as np
-import numpy.random
-
 
 # Моделирование данных датчика
 def simulateSensor(samplesCount, noiseSigma, dt):
