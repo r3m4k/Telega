@@ -1,6 +1,6 @@
 .idea
 ./dev/logs
-./dev/test.py
+dev/test.py
 *.log
 *.bin
 *.pyc
