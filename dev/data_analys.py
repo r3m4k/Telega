@@ -13,10 +13,10 @@ from matplotlib.figure import Figure
 from matplotlib.axes import Axes
 
 # User imports
-from consts import CWD, JSON_FILE
-from dev.consts import color_scheme
+from consts import CWD, JSON_FILE, color_scheme
 import filterpy.kalman
 import filterpy.common
+
 
 ##########################################################
 
@@ -32,6 +32,7 @@ def name_of_file(path, extension):
         file = file[file.find('/') + 1:]
 
     return file[:file.find(extension)]
+
 
 ##########################################################
 
@@ -52,19 +53,19 @@ class Decoder:
     )
 
     def __init__(self, filename: str):
-        self._index = 0              # Индекс прочитанного символа в файле
-        self._con_sum = 0            # Посчитанная контрольная сумма
-        self._filename = filename    # Имя обрабатываемого файла
+        self._index = 0  # Индекс прочитанного символа в файле
+        self._con_sum = 0  # Посчитанная контрольная сумма
+        self._filename = filename  # Имя обрабатываемого файла
         self._file: BinaryIO = None  # Переменная для хранения файла
 
-        with open(JSON_FILE, 'r')  as json_file:
+        with open(JSON_FILE, 'r') as json_file:
             json_data = json.load(json_file)["Decoder"]
             self._header = json_data["header"]
             self._titles = json_data["titles"]
             self._coefficients = json_data["value_coefficients"]
 
         self._received_data = {key: np.array([], dtype=float) for key in self._titles}
-        self._supported_formats = (0xc8, )
+        self._supported_formats = (0xc8,)
         self._package_size = 0
 
     def get_data(self):
@@ -75,8 +76,8 @@ class Decoder:
         self._file = open(self._filename, "rb")
         max_size = os.path.getsize(self._filename)
 
-        bytes_buffer = []   # Буфер для байтов, прочитанных из очереди данных
-        
+        bytes_buffer = []  # Буфер для байтов, прочитанных из очереди данных
+
         Stages = self._Stages
         stage = Stages.WantHeader
 
@@ -176,6 +177,7 @@ class Decoder:
 
             buffer_index += 2
 
+
 ##########################################################
 
 class Canvas:
@@ -222,7 +224,7 @@ class Canvas:
                       label=[None, 'cos(x)'])
 
         plt.show()
-        
+
     """
 
     def __init__(self, fig_height=9, fig_width=16, n_rows=1, n_cols=1, *ax_args, **ax_kwargs):
@@ -295,9 +297,9 @@ class Canvas:
                 ax.grid(**kwargs)
 
     def set_axis_labels(self,
-                       x_label: str | list[str] | list[list[str]] = None,
-                       y_label: str | list[str] | list[list[str]] = None,
-                       **text_kwargs):
+                        x_label: str | list[str] | list[list[str]] = None,
+                        y_label: str | list[str] | list[list[str]] = None,
+                        **text_kwargs):
 
         for n_row in range(self._nrows):
             for n_col in range(self._ncols):
@@ -424,11 +426,13 @@ class Canvas:
                         ax.plot(_x_axis_array, _plot_data_array[n_row, n_col], **axis_kwargs, **line_kwargs)
                     # Если разные
                     else:
-                        ax.plot(_x_axis_array[n_row, n_col], _plot_data_array[n_row, n_col], **axis_kwargs, **line_kwargs)
+                        ax.plot(_x_axis_array[n_row, n_col], _plot_data_array[n_row, n_col], **axis_kwargs,
+                                **line_kwargs)
 
                 if "label" in axis_kwargs.keys():
                     if axis_kwargs["label"]:
                         ax.legend()
+
 
 ##########################################################
 
@@ -436,6 +440,7 @@ class KalmanFilter:
     """
     Класс для фильтрации данных с помощью фильтра Калмана
     """
+
     def __init__(self, data: np.typing.NDArray, initial_state: float):
         self._data = data
         self._initial_state = initial_state
@@ -448,10 +453,10 @@ class KalmanFilter:
     def _filtering(self):
         # Создаём объект KalmanFilter
         flt = filterpy.kalman.KalmanFilter(dim_x=1,  # Размер вектора состояния
-                                            dim_z=1)  # Размер вектора измерений
+                                           dim_z=1)  # Размер вектора измерений
 
-        processNoise = 1e-4                     # Погрешность модели
-        measurementSigma = np.std(self._data)   # Среднеквадратичное отклонение
+        processNoise = 1e-4  # Погрешность модели
+        measurementSigma = np.std(self._data)  # Среднеквадратичное отклонение
 
         # F - матрица процесса - размер dim_x на dim_x - 1х1
         flt.F = np.array([[1.0]])
@@ -487,177 +492,3 @@ class KalmanFilter:
         # stateCovarianceHistory = np.array(stateCovarianceHistory)
 
 ##########################################################
-
-class DataProcessing:
-    """
-    Класс для чтения данных из файлов, собранных во время поезди с телегой
-    """
-    def __init__(self, data_dir: str, file_list: list[str]):
-        self._data_dir: str = data_dir              # Директория, в которой находятся файлы
-        self._file_list: list[str] = file_list      # Список обрабатываемых файлов
-
-        self._received_data = {}                    # Переменная для хранения прочитанных данных
-
-        self._file_init: str = None                 # Файл с данными выставки датчиков
-        self._files_measuring: list[str] = None     # Список файлов с данными проездов
-        self._files_buffer: list[str] = None        # Список файлов с буферами, собранными перед проездами
-
-    def start(self):
-        for filename in self._file_list:
-            decoder = Decoder(f'{self._data_dir}/{filename}')
-            decoder.decoding()
-            self._received_data[filename] = decoder.get_data()
-
-    def get_data(self):
-        return self._received_data
-
-    def plotting_raw_data(self):
-        """
-        Создание графиков исходных данных, прочитанных из файла file_name
-        """
-        for filename in self._file_list:
-            file_data = self._received_data[filename]
-
-            # Построение графиков температуры и абсолютных величин ускорения и угловых скоростей
-            canvas_Abs = Canvas(n_rows=3, n_cols=1)
-            canvas_Abs.suptitle(f'Величины температуры и абсолютных величин ускорения и угловых скоростей из файла {filename}', weight='bold')
-            canvas_Abs.plot(file_data['Time'] / 60,
-                            [np.sqrt(file_data[f'Acc_X'] ** 2 + file_data[f'Acc_Y'] ** 2 + file_data[f'Acc_Z'] ** 2),
-                             np.sqrt(file_data[f'Gyro_X'] ** 2 + file_data[f'Gyro_Y'] ** 2 + file_data[f'Gyro_Z'] ** 2),
-                             file_data['Temp']],
-                            color_names=[color_scheme['ABS_values']['Acc'],
-                                         color_scheme['ABS_values']['Gyro'],
-                                         color_scheme['ABS_values']['Temp']])
-            canvas_Abs.grid_all_axes()
-            canvas_Abs.set_axis_labels(x_label='Time, minutes',
-                                       y_label=['acceleration, m / c**2', 'angular velocity, mgps', 'temperature, ---'])
-            canvas_Abs.tight_layout()
-
-            # Построение графиков ускорений
-            canvas_Acc = Canvas(n_rows=3, n_cols=1)
-            canvas_Acc.suptitle(f'Величины ускорений из файла {filename}', weight='bold')
-            canvas_Acc.plot(file_data['Time'] / 60,
-                            [file_data[f'Acc_{coord}'] for coord in ['X', 'Y', 'Z']],
-                            label=['raw_data1', None, 'raw_data2'],
-                            color_names=[color_scheme['RGB_classic']['X'],
-                                         color_scheme['RGB_classic']['Y'],
-                                         color_scheme['RGB_classic']['Z']])
-            canvas_Acc.plot(file_data['Time'] / 60,
-                            [KalmanFilter(file_data[f'Acc_{coord}'], file_data[f'Acc_{coord}'][0]).get_filtered_data()
-                            for coord in ['X', 'Y', 'Z']],
-                            label=['filtered_data1', None, 'filtered_data2'],
-                            color_names=[color_scheme['RGB_dark']['X'],
-                                         color_scheme['RGB_dark']['Y'],
-                                         color_scheme['RGB_dark']['Z']],
-                            linewidth=2.5)
-            canvas_Acc.grid_all_axes()
-            canvas_Acc.set_axis_labels(x_label='Time, minutes',
-                                       y_label=[f'Acc_{coord}, m / c**2' for coord in ['X', 'Y', 'Z']])
-            canvas_Acc.tight_layout()
-
-            # Построение графиков угловых скоростей
-            canvas_Gyro = Canvas(n_rows=3, n_cols=1)
-            canvas_Gyro.suptitle(f'Величины угловых скоростей из файла {filename}', weight='bold')
-            canvas_Gyro.plot(file_data['Time'] / 60,
-                            [file_data[f'Gyro_{coord}'] for coord in ['X', 'Y', 'Z']],
-                             color_names=[color_scheme['COP_classic']['X'],
-                                          color_scheme['COP_classic']['Y'],
-                                          color_scheme['COP_classic']['Z']])
-
-            canvas_Gyro.grid_all_axes()
-            canvas_Gyro.set_axis_labels(x_label='Time, minutes',
-                                        y_label=[f'Gyro_{coord}, mgps'  for coord in ['X', 'Y', 'Z']])
-            canvas_Gyro.tight_layout()
-
-    def plotting_zero_data(self, filename: str, saving_path: str = None):
-        """
-        Создание графиков и распределений нулевых значений из файла filename
-        """
-        file_data: np.typing.NDArray[float] = self._received_data[filename]
-        coords = ['X', 'Y', 'Z']
-
-        # Ускорения
-        canvas_Acc = Canvas(n_rows=3, n_cols=2, width_ratios=[3, 1])
-        canvas_Acc.plot([[file_data['Time'] / 60, np.full(file_data["Time"].shape, np.nan, dtype=float)] for _ in range(3)],
-                        [[file_data[f'Acc_{coord}'], np.full(file_data["Time"].shape, np.nan, dtype=float)] for coord in ['X', 'Y', 'Z']],
-                        color_names=[[color_scheme['RGB_classic']['X'], None],
-                                     [color_scheme['RGB_classic']['Y'], None],
-                                     [color_scheme['RGB_classic']['Z'], None]])
-
-        canvas_Acc.suptitle(f'Анализ ускорений по осям из файла {filename}', weight='bold')
-        canvas_Acc.set_axis_labels(x_label=['Time, minutes', None],
-                                   y_label=[['Acc_X, m / c**2', None],
-                                            ['Acc_Y, m / c**2', None],
-                                            ['Acc_Z, m / c**2', None]])
-        for n_row in range(3):
-            ax = cast(Axes, canvas_Acc.ax[n_row, 0])
-            ax.axhline(np.mean(file_data[f'Acc_{coords[n_row]}']),
-                       color=color_scheme['RGB_dark'][coords[n_row]],
-                       linestyle='--', linewidth=2.5)
-            ax.annotate(f'Mean Acc_{coords[n_row]} = {np.mean(file_data[f'Acc_{coords[n_row]}']).round(3)}',
-                          xy=(0.64, 0.88), xycoords='axes fraction', size=10,
-                          bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", lw=2))
-            ax.grid()
-
-        # Угловые скорости
-        canvas_Gyro = Canvas(n_rows=3, n_cols=2, width_ratios=[3, 1])
-        canvas_Gyro.plot([[file_data['Time'] / 60, np.full(file_data["Time"].shape, np.nan, dtype=float)] for _ in range(3)],
-                        [[file_data[f'Gyro_{coord}'], np.full(file_data["Time"].shape, np.nan, dtype=float)] for coord in ['X', 'Y', 'Z']],
-                        color_names=[[color_scheme['COP_classic']['X'], None],
-                                     [color_scheme['COP_classic']['Y'], None],
-                                     [color_scheme['COP_classic']['Z'], None]])
-
-        canvas_Gyro.suptitle(f'Анализ ускорений по осям из файла {filename}', weight='bold')
-        canvas_Gyro.set_axis_labels(x_label=['Time, minutes', None],
-                                   y_label=[['Gyro_X, m / c**2', None],
-                                            ['Gyro_Y, m / c**2', None],
-                                            ['Gyro_Z, m / c**2', None]])
-        for n_row in range(3):
-            ax = cast(Axes, canvas_Gyro.ax[n_row, 0])
-            ax.axhline(np.mean(file_data[f'Gyro_{coords[n_row]}']),
-                       color=color_scheme['COP_dark'][coords[n_row]],
-                       linestyle='--', linewidth=2.5)
-            ax.annotate(f'Mean Gyro_{coords[n_row]} = {np.mean(file_data[f'Gyro_{coords[n_row]}']).round(3)}',
-                          xy=(0.64, 0.88), xycoords='axes fraction', size=10,
-                          bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", lw=2))
-            ax.grid()
-
-        # Гистограммы
-        n_bins = 100
-        for n_row in range(3):
-            ax = cast(Axes, canvas_Acc.ax[n_row, 1])
-            ax.hist(file_data[f'Acc_{coords[n_row]}'], bins=n_bins, color='gray')
-            ax.set_yticks([])
-            ax.set_facecolor('whitesmoke')
-            ax.annotate(f'σ = {np.round(np.std(file_data[f'Acc_{coords[n_row]}']), 6)}', xy=(0.64, 0.88),
-                        xycoords='axes fraction', size=10,
-                        bbox=dict(boxstyle="round,pad=0.3", fc="lightgray", ec="gray", lw=2))
-
-            ax = cast(Axes, canvas_Gyro.ax[n_row, 1])
-            ax.hist(file_data[f'Gyro_{coords[n_row]}'], bins=n_bins, color='gray')
-            ax.set_yticks([])
-            ax.set_facecolor('whitesmoke')
-            ax.annotate(f'σ = {np.round(np.std(file_data[f'Gyro_{coords[n_row]}']), 6)}', xy=(0.64, 0.88),
-                        xycoords='axes fraction', size=10,
-                        bbox=dict(boxstyle="round,pad=0.3", fc="lightgray", ec="gray", lw=2))
-
-
-        canvas_Acc.tight_layout()
-        canvas_Gyro.tight_layout()
-
-        if saving_path:
-            canvas_Acc.save_figure(f'{saving_path}/{name_of_file(filename, ".bin")}_Acc.png')
-            canvas_Acc.save_figure(f'{saving_path}/{name_of_file(filename, ".bin")}_Gyro.png')
-
-
-    def _reading_file(self):
-        pass
-
-##########################################################
-
-if __name__ == '__main__':
-    analyser = DataProcessing(f'{CWD}/10.06.25', ['telega_2025-06-10_STM_Init.bin', 'telega_2025-06-10_STM_RawData_7.bin', ])
-    analyser.start()
-    # analyser.plotting_raw_data()
-    analyser.plotting_zero_data('telega_2025-06-10_STM_Init.bin')
-    plt.show()
