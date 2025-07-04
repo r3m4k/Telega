@@ -33,6 +33,20 @@ def name_of_file(path, extension):
 
     return file[:file.find(extension)]
 
+def integration(x_value, y_value):
+    """
+    Интегрирование с помощью метода трапеции.
+    """
+
+    result = 0
+    integrated_array = np.zeros_like(x_value)
+
+    for index in range(len(x_value) - 1):
+        result += (x_value[index + 1] - x_value[index]) * (y_value[index] + y_value[index + 1]) / 2
+        integrated_array[index + 1] = result
+
+    return integrated_array
+
 
 ##########################################################
 
@@ -234,6 +248,10 @@ class Canvas:
 
         self._nrows = n_rows
         self._ncols = n_cols
+
+    def __del__(self):
+        self.fig.clf()
+        plt.close()
 
     def save_figure(self, saving_path: str):
         self.fig.savefig(saving_path)
