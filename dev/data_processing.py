@@ -66,11 +66,16 @@ class DataProcessing:
                 'plotting_raw_data': self._plotting_raw_data,
                 'plotting_init_data': self._plotting_init_data,
                 'plotting_buffers_data': self._plotting_buffers_data
+            },
+            'Analysis': {
+                'plotting_filtered_data': self._plotting_filtered_data,
             }
         }
 
         if os.path.exists(self._saving_dir):
             shutil.rmtree(self._saving_dir)
+            os.mkdir(self._saving_dir)
+        else:
             os.mkdir(self._saving_dir)
 
     # -------------------------------
@@ -168,11 +173,13 @@ class DataProcessing:
     # -------------------------------
     def _raw_data_plotting(self):
         print('# -------------------------------')
+        print('# Визуализация исходных данных')
+        print('# -------------------------------')
         class_params: dir = self._config['Raw_Data']
         user_params: dir = self._parameters['Raw_Data']
 
         for key, value in user_params.items():
-            if value:
+            if value and key != 'kwargs':
                 class_params[key](**user_params['kwargs'])
 
     def _plotting_init_data(self):
@@ -195,7 +202,7 @@ class DataProcessing:
             # Построим графики
             self._plotting_static_data(self._files_measuring[i].buffer, saving_path)
 
-    def _plotting_raw_data(self):
+    def _plotting_raw_data(self, plot_filtered_data: bool = False):
         """
         Создание графиков исходных данных, прочитанных из файлов self._files_measuring[_].data
         """
@@ -237,12 +244,13 @@ class DataProcessing:
             plotter_Acc = Plotter(canvas_config)
             plotter_Acc.plotting_3d()
 
-            plotter_Acc.canvas.plot(file_data['Time'] / 60,
-                                    [Filter(file_data[f'Acc_{coord}']).get_filtered_data() for coord in coords],
-                                    color_names=[color_scheme['RGB_dark']['X'],
-                                                 color_scheme['RGB_dark']['Y'],
-                                                 color_scheme['RGB_dark']['Z']],
-                                    linewidth=2.5)
+            if plot_filtered_data:
+                plotter_Acc.canvas.plot(file_data['Time'] / 60,
+                                        [Filter(file_data[f'Acc_{coord}']).get_filtered_data() for coord in coords],
+                                        color_names=[color_scheme['RGB_dark']['X'],
+                                                     color_scheme['RGB_dark']['Y'],
+                                                     color_scheme['RGB_dark']['Z']],
+                                        linewidth=2.5)
 
             # Построение графиков угловых скоростей
             canvas_config.suptitle = f'Величины угловых скоростей из файла {filename}'
@@ -255,12 +263,14 @@ class DataProcessing:
 
             plotter_Gyro = Plotter(canvas_config)
             plotter_Gyro.plotting_3d()
-            plotter_Gyro.canvas.plot(file_data['Time'] / 60,
-                                     [Filter(file_data[f'Gyro_{coord}']).get_filtered_data() for coord in coords],
-                                     color_names=[color_scheme['COP_dark']['X'],
-                                                  color_scheme['COP_dark']['Y'],
-                                                  color_scheme['COP_dark']['Z']],
-                                     linewidth=2.5)
+
+            if plot_filtered_data:
+                plotter_Gyro.canvas.plot(file_data['Time'] / 60,
+                                         [Filter(file_data[f'Gyro_{coord}']).get_filtered_data() for coord in coords],
+                                         color_names=[color_scheme['COP_dark']['X'],
+                                                      color_scheme['COP_dark']['Y'],
+                                                      color_scheme['COP_dark']['Z']],
+                                         linewidth=2.5)
 
             # Сохраним полученные графики
             saving_path = f'{self._saving_dir}/Данные проездов'
@@ -295,7 +305,7 @@ class DataProcessing:
         canvas_config.color_names = [color_scheme['RGB_classic']['X'],
                                      color_scheme['RGB_classic']['Y'],
                                      color_scheme['RGB_classic']['Z']]
-        
+
         canvas_config.dark_color_names = [color_scheme['RGB_dark']['X'],
                                           color_scheme['RGB_dark']['Y'],
                                           color_scheme['RGB_dark']['Z']]
@@ -334,13 +344,16 @@ class DataProcessing:
             plotter_Acc.save(f'{saving_path}/{name_of_file(filename, ".bin")}_Acc.png')
             plotter_Gyro.save(f'{saving_path}/{name_of_file(filename, ".bin")}_Gyro.png')
 
-    def _plotting_filtered_data(self):
-        pass
-
     # -------------------------------
     # Обработка исходных данных
     # -------------------------------
     def _raw_data_analysis(self):
+
+        print('# ----------------------------------')
+        print('# Обязательны этапы обработки данных')
+        print('# ----------------------------------')
+        print('Вычитание нулевых величин и фильтрация данных')
+
         for measuring_pair in self._files_measuring:
             for val_type in ['Acc', 'Gyro']:
                 for coord in ['X', 'Y', 'Z']:
@@ -352,6 +365,74 @@ class DataProcessing:
 
                     # Вычтем нулевые значения
                     data -= np.mean(buffer)
+
+                    self._received_data[measuring_pair.data][f'{val_type}_{coord}'] = data
+
+        print('Перевод данных акселерометра в СК Земли')
+
+        class_params: dir = self._config['Analysis']
+        user_params: dir = self._parameters['Analysis']
+
+        for key, value in user_params.items():
+            if value and key != 'kwargs':
+                class_params[key](**user_params['kwargs'])
+
+
+    def _plotting_filtered_data(self):
+        for measuring_pair in self._files_measuring:
+            filename = measuring_pair.data
+            print(f'Построение фильтрованных данных из файла {filename}')
+            file_data = self._received_data[filename]
+
+            coords = ['X', 'Y', 'Z']
+
+            canvas_config = CanvasConfig()
+            canvas_config.n_rows = 3; canvas_config.n_cols = 1
+            canvas_config.x_data = file_data['Time'] / 60
+            canvas_config.x_label = 'Time, minutes'
+
+            # Ускорение
+            canvas_config.y_data = [file_data[f'Acc_{coord}'] for coord in coords]
+            canvas_config.suptitle = f'Фильтрованные величины ускорений из файла {filename}'
+            canvas_config.color_names = [color_scheme['RGB_classic']['X'],
+                                         color_scheme['RGB_classic']['Y'],
+                                         color_scheme['RGB_classic']['Z']]
+            canvas_config.y_label = [f'Acc_{coord}, m / c**2' for coord in coords]
+
+            plotter_Acc = Plotter(canvas_config)
+            plotter_Acc.plotting_3d()
+            plotter_Acc.plotting_hline(values=[np.mean(file_data[f'Acc_{coord}']) for coord in coords],
+                                       colors=[color_scheme['RGB_dark']['X'],
+                                               color_scheme['RGB_dark']['Y'],
+                                               color_scheme['RGB_dark']['Z']],
+                                       annotations=[f'Zero Acc_{coord} = {np.round(np.mean(file_data[f'Acc_{coord}']), 5)}' for coord in coords])
+
+            # Угловые скорости
+            canvas_config.y_data = [file_data[f'Gyro_{coord}'] for coord in coords]
+            canvas_config.suptitle = f'Фильтрованные величины угловых скоростей из файла {filename}'
+            canvas_config.color_names = [color_scheme['COP_classic']['X'],
+                                         color_scheme['COP_classic']['Y'],
+                                         color_scheme['COP_classic']['Z']]
+            canvas_config.y_label = [f'Gyro_{coord}, mpgs' for coord in coords]
+
+            plotter_Gyro = Plotter(canvas_config)
+            plotter_Gyro.plotting_3d()
+            plotter_Gyro.plotting_hline(values=[np.mean(file_data[f'Gyro_{coord}']) for coord in coords],
+                                        colors=[color_scheme['COP_dark']['X'],
+                                                color_scheme['COP_dark']['Y'],
+                                                color_scheme['COP_dark']['Z']],
+                                        annotations=[f'Zero Gyro_{coord} = {np.round(np.mean(file_data[f'Acc_{coord}']), 5)}' for coord in coords])
+            # Сохраним полученные графики
+            saving_path = f'{self._saving_dir}/Фильтрованные данные'
+            if not os.path.exists(saving_path):
+                os.mkdir(saving_path)
+
+            saving_path += f'/{name_of_file(filename, ".bin")}'
+            if not os.path.exists(saving_path):
+                os.mkdir(saving_path)
+
+            plotter_Acc.save(f'{saving_path}/{name_of_file(filename, ".bin")}_Acc.png')
+            plotter_Gyro.save(f'{saving_path}/{name_of_file(filename, ".bin")}_Gyro.png')
 
     # -------------------------------
 
@@ -370,18 +451,17 @@ if __name__ == '__main__':
 
             # 'mode': 'manual_file_classification',
             # 'kwargs': {
-            #     'file_init': 'telega_2025-06-10_STM_Init.bin',
+            #     'file_init': 'telega_2025-08-08_STM_Init.bin',
             #     'files_measuring': [
-            #        {'buffer': 'telega_2025-06-10_STM_RawData_2.bin', 'data': 'telega_2025-06-10_STM_RawData_3.bin'},
-            #        {'buffer': 'telega_2025-06-10_STM_RawData_4.bin', 'data': 'telega_2025-06-10_STM_RawData_5.bin'}
+            #        {'buffer': 'telega_2025-08-08_STM_Init.bin', 'data': 'telega_2025-08-08_STM_RawData_1.bin'}
             #     ]
             # }
         },
         'Raw_Data': {
-            'plotting_init_data': True,
-            'plotting_buffers_data': True,
+            'plotting_init_data': False,
+            'plotting_buffers_data': False,
             'plotting_raw_data': True,
-            'kwargs': {}
+            'kwargs': {'plot_filtered_data': True}
         },
         'Analysis': {
             'plotting_filtered_data': False,

@@ -377,16 +377,14 @@ class Plotter:
         else:
             raise RuntimeError('Unknown x_label type.')
 
-        if self.canvas_config.annotation:
-            for n_row in range(3):
-                ax = cast(Axes, self.canvas.ax[n_row, 0])
-                ax.axhline(np.mean(self.canvas_config.y_data[n_row]),
-                           color=self.canvas_config.dark_color_names[n_row],
-                           linestyle='--', linewidth=2.5)
-                ax.annotate(self.canvas_config.annotation[n_row],
-                            xy=(0.64, 0.88), xycoords='axes fraction', size=10,
-                            bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", lw=2))
-                ax.grid()
+        self.plotting_hline(values=[np.mean(self.canvas_config.y_data[n_row]) for n_row in range(3)],
+                            colors=[self.canvas_config.dark_color_names[n_row] for n_row in range(3)],
+                            annotations=self.canvas_config.annotation)
+
+        # Создадим сетку на графиках
+        for n_row in range(3):
+            ax = cast(Axes, self.canvas.ax[n_row, 0])
+            ax.grid()
 
         # Гистограммы
         n_bins = 100
@@ -400,3 +398,18 @@ class Plotter:
                         bbox=dict(boxstyle="round,pad=0.3", fc="lightgray", ec="gray", lw=2))
 
         self.canvas.tight_layout()
+
+    def plotting_hline(self, values: list[float],  colors: list[str], annotations: list[str]=None):
+        for n_row in range(3):
+            try:
+                ax = cast(Axes, self.canvas.ax[n_row, 0])
+            except IndexError:
+                ax = cast(Axes, self.canvas.ax[n_row])
+
+            ax.axhline(values[n_row],
+                       color=colors[n_row],
+                       linestyle='--', linewidth=2.5)
+            if annotations[n_row]:
+                ax.annotate(annotations[n_row],
+                            xy=(0.64, 0.88), xycoords='axes fraction', size=10,
+                            bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", lw=2))
