@@ -19,9 +19,10 @@ from matplotlib.figure import Figure
 from matplotlib.axes import Axes
 
 # User imports
-from consts import CWD, JSON_FILE, color_scheme
+from consts import CWD, JSON_FILE, color_scheme, Moscow_coordinates
 from data_analys import *
 from plotting import *
+from rotation import RotatingFrameAnalyzer
 
 ##########################################################
 
@@ -44,13 +45,12 @@ class DataProcessing:
         self._data_dir: str = data_dir                              # Директория, в которой находятся файлы
         self._saving_dir: str = f'{data_dir}/Обработка данных'      # Директория сохранения результатов обработки данных
 
+        self._coords = ['X', 'Y', 'Z']
+
         self._file_list: list[str] = file_list      # Список обрабатываемых файлов
         self._parameters: dict = parameters         # Словарь с параметрами обработки данных
 
         self._received_data = {}                    # Переменная для хранения прочитанных данных
-
-        self._coordinates = {}                      # Полученные координаты
-        self._angles = {}                           # Полученные углы
 
         self._file_init: str = str()                            # Файл с данными выставки датчиков
         self._files_measuring: list[MeasuringPair] = list()     # Список именованных кортежей с файлами с данными проездов
@@ -68,7 +68,7 @@ class DataProcessing:
                 'plotting_buffers_data': self._plotting_buffers_data
             },
             'Analysis': {
-                'plotting_filtered_data': self._plotting_filtered_data,
+                'plotting_analysed_data': self._plotting_analysed_data,
             }
         }
 
@@ -85,7 +85,7 @@ class DataProcessing:
         return self._received_data
 
     # ---------------------------------
-    # Основная функция обработки данных
+    # Основные функции обработки данных
     # ---------------------------------
     def start(self):
         self._decoding()
@@ -211,8 +211,6 @@ class DataProcessing:
             print(f'Построение данных из файла {filename}')
             file_data = self._received_data[filename]
 
-            coords = ['X', 'Y', 'Z']
-
             # Построение графиков температуры и абсолютных величин ускорения и угловых скоростей
             canvas_config = CanvasConfig()
 
@@ -235,18 +233,18 @@ class DataProcessing:
 
             # Построение графиков ускорений
             canvas_config.suptitle = f'Величины ускорений из файла {filename}'
-            canvas_config.y_data = [file_data[f'Acc_{coord}'] for coord in coords]
+            canvas_config.y_data = [file_data[f'Acc_{coord}'] for coord in self._coords]
             canvas_config.color_names = [color_scheme['RGB_classic']['X'],
                                          color_scheme['RGB_classic']['Y'],
                                          color_scheme['RGB_classic']['Z']]
-            canvas_config.y_label = [f'Acc_{coord}, m / c**2' for coord in coords]
+            canvas_config.y_label = [f'Acc_{coord}, m / c**2' for coord in self._coords]
 
             plotter_Acc = Plotter(canvas_config)
             plotter_Acc.plotting_3d()
 
             if plot_filtered_data:
                 plotter_Acc.canvas.plot(file_data['Time'] / 60,
-                                        [Filter(file_data[f'Acc_{coord}']).get_filtered_data() for coord in coords],
+                                        [Filter(file_data[f'Acc_{coord}']).get_filtered_data() for coord in self._coords],
                                         color_names=[color_scheme['RGB_dark']['X'],
                                                      color_scheme['RGB_dark']['Y'],
                                                      color_scheme['RGB_dark']['Z']],
@@ -254,19 +252,19 @@ class DataProcessing:
 
             # Построение графиков угловых скоростей
             canvas_config.suptitle = f'Величины угловых скоростей из файла {filename}'
-            canvas_config.y_data = [file_data[f'Gyro_{coord}'] for coord in coords]
+            canvas_config.y_data = [file_data[f'Gyro_{coord}'] for coord in self._coords]
             canvas_config.color_names = [color_scheme['COP_classic']['X'],
                                          color_scheme['COP_classic']['Y'],
                                          color_scheme['COP_classic']['Z']]
             canvas_config.line_kwargs['linewidth'] = 2.0
-            canvas_config.y_label = [f'Gyro_{coord}, mpgs' for coord in coords]
+            canvas_config.y_label = [f'Gyro_{coord}, mpgs' for coord in self._coords]
 
             plotter_Gyro = Plotter(canvas_config)
             plotter_Gyro.plotting_3d()
 
             if plot_filtered_data:
                 plotter_Gyro.canvas.plot(file_data['Time'] / 60,
-                                         [Filter(file_data[f'Gyro_{coord}']).get_filtered_data() for coord in coords],
+                                         [Filter(file_data[f'Gyro_{coord}']).get_filtered_data() for coord in self._coords],
                                          color_names=[color_scheme['COP_dark']['X'],
                                                       color_scheme['COP_dark']['Y'],
                                                       color_scheme['COP_dark']['Z']],
@@ -290,7 +288,6 @@ class DataProcessing:
         Создание графиков и распределений величин из filename
         """
         file_data: np.typing.NDArray[float] = self._received_data[self._file_init]
-        coords = ['X', 'Y', 'Z']
 
         # Ускорения
         canvas_config = CanvasConfig()
@@ -299,7 +296,7 @@ class DataProcessing:
         canvas_config.ax_kwargs['width_ratios'] = [3, 1]
 
         canvas_config.x_data = file_data['Time'] / 60
-        canvas_config.y_data = [file_data[f'Acc_{coord}'] for coord in coords]
+        canvas_config.y_data = [file_data[f'Acc_{coord}'] for coord in self._coords]
 
         canvas_config.suptitle = f'Анализ ускорений по осям из файла {filename}'
         canvas_config.color_names = [color_scheme['RGB_classic']['X'],
@@ -310,16 +307,16 @@ class DataProcessing:
                                           color_scheme['RGB_dark']['Y'],
                                           color_scheme['RGB_dark']['Z']]
         canvas_config.x_label = 'Time, minutes'
-        canvas_config.y_label = [f'Acc_{coord}, m / c**2' for coord in coords]
+        canvas_config.y_label = [f'Acc_{coord}, m / c**2' for coord in self._coords]
 
-        canvas_config.annotation = [f'Mean Acc_{coord} = {np.mean(file_data[f'Acc_{coord}']).round(6)}' for coord in coords]
+        canvas_config.annotation = [f'Mean Acc_{coord} = {np.mean(file_data[f'Acc_{coord}']).round(6)}' for coord in self._coords]
 
         plotter_Acc = Plotter(canvas_config)
         plotter_Acc.plotting_3d_static()
 
 
         # Угловые скорости
-        canvas_config.y_data = [file_data[f'Gyro_{coord}'] for coord in coords]
+        canvas_config.y_data = [file_data[f'Gyro_{coord}'] for coord in self._coords]
 
         canvas_config.suptitle = f'Анализ угловых скоростей по осям из файла {filename}'
         canvas_config.color_names = [color_scheme['COP_classic']['X'],
@@ -330,10 +327,10 @@ class DataProcessing:
                                           color_scheme['COP_dark']['Y'],
                                           color_scheme['COP_dark']['Z']]
 
-        canvas_config.y_label = [f'Gyro_{coord}, mgps' for coord in coords]
+        canvas_config.y_label = [f'Gyro_{coord}, mgps' for coord in self._coords]
 
         canvas_config.annotation = [f'Mean Gyro_{coord} = {np.mean(file_data[f'Gyro_{coord}']).round(6)}' for coord in
-                                    coords]
+                                    self._coords]
 
         plotter_Gyro = Plotter(canvas_config)
         plotter_Gyro.plotting_3d_static()
@@ -348,27 +345,18 @@ class DataProcessing:
     # Обработка исходных данных
     # -------------------------------
     def _raw_data_analysis(self):
-
         print('# ----------------------------------')
         print('# Обязательны этапы обработки данных')
         print('# ----------------------------------')
-        print('Вычитание нулевых величин и фильтрация данных')
+
+        self._data_filtering()
+
+        print('# ----------------------------------')
 
         for measuring_pair in self._files_measuring:
-            for val_type in ['Acc', 'Gyro']:
-                for coord in ['X', 'Y', 'Z']:
-                    data = self._received_data[measuring_pair.data][f'{val_type}_{coord}']
-                    buffer = self._received_data[measuring_pair.buffer][f'{val_type}_{coord}']
+            self._measurement_analysis(measuring_pair)
 
-                    # Сохраним отфильтрованные данные проезда
-                    data = Filter(data).get_filtered_data()
-
-                    # Вычтем нулевые значения
-                    data -= np.mean(buffer)
-
-                    self._received_data[measuring_pair.data][f'{val_type}_{coord}'] = data
-
-        print('Перевод данных акселерометра в СК Земли')
+        print('# ----------------------------------')
 
         class_params: dir = self._config['Analysis']
         user_params: dir = self._parameters['Analysis']
@@ -377,14 +365,43 @@ class DataProcessing:
             if value and key != 'kwargs':
                 class_params[key](**user_params['kwargs'])
 
-
-    def _plotting_filtered_data(self):
+    def _data_filtering(self):
+        """
+        Фильтрация данных проездов с последующим сохранением
+        """
         for measuring_pair in self._files_measuring:
             filename = measuring_pair.data
-            print(f'Построение фильтрованных данных из файла {filename}')
-            file_data = self._received_data[filename]
+            print(f'Фильтрация данных их файла {filename}')
 
-            coords = ['X', 'Y', 'Z']
+            # Прогоним через фильтр только необходимые данные
+            for key in ['Acc_X', 'Acc_Y', 'Acc_Z', 'Gyro_X', 'Gyro_Y', 'Gyro_Z']:
+                self._received_data[filename][key] = Filter(self._received_data[filename][key]).get_filtered_data()
+
+    def _measurement_analysis(self, measuring_pair: MeasuringPair):
+        print(f'Анализ проезда по данным из файлов {measuring_pair.buffer} и {measuring_pair.data}')
+        analyzer = RotatingFrameAnalyzer(
+            time=self._received_data[measuring_pair.data]['Time'],
+            acc_dict={coord: self._received_data[measuring_pair.data][f'Acc_{coord}'] for coord in ['X', 'Y', 'Z']},
+            acc_dict_buffer={coord: self._received_data[measuring_pair.buffer][f'Acc_{coord}'] for coord in
+                             ['X', 'Y', 'Z']},
+            gyro_dict={coord: self._received_data[measuring_pair.data][f'Gyro_{coord}'] for coord in
+                       ['X', 'Y', 'Z']},
+            gyro_dict_buffer={coord: self._received_data[measuring_pair.buffer][f'Gyro_{coord}'] for coord in
+                              ['X', 'Y', 'Z']},
+            latitude=Moscow_coordinates.latitude
+        )
+        analyzer.start()
+
+        # Сохраним обработанные данные
+        result: dict = analyzer.get_analyzed_values()
+        for key in result.keys():
+            self._received_data[measuring_pair.data][key] = result[key]
+
+    def _plotting_analysed_data(self):
+        for measuring_pair in self._files_measuring:
+            filename = measuring_pair.data
+            print(f'Построение обработанных данных из файла {filename}')
+            file_data = self._received_data[filename]
 
             canvas_config = CanvasConfig()
             canvas_config.n_rows = 3; canvas_config.n_cols = 1
@@ -392,38 +409,29 @@ class DataProcessing:
             canvas_config.x_label = 'Time, minutes'
 
             # Ускорение
-            canvas_config.y_data = [file_data[f'Acc_{coord}'] for coord in coords]
-            canvas_config.suptitle = f'Фильтрованные величины ускорений из файла {filename}'
+            canvas_config.y_data = [file_data[f'Acc_{coord}'] for coord in self._coords]
+            canvas_config.suptitle = f'Обработанные величины ускорений из файла {filename}'
             canvas_config.color_names = [color_scheme['RGB_classic']['X'],
                                          color_scheme['RGB_classic']['Y'],
                                          color_scheme['RGB_classic']['Z']]
-            canvas_config.y_label = [f'Acc_{coord}, m / c**2' for coord in coords]
+            canvas_config.y_label = [f'Acc_{coord}, m / c**2' for coord in self._coords]
 
             plotter_Acc = Plotter(canvas_config)
             plotter_Acc.plotting_3d()
-            plotter_Acc.plotting_hline(values=[np.mean(file_data[f'Acc_{coord}']) for coord in coords],
-                                       colors=[color_scheme['RGB_dark']['X'],
-                                               color_scheme['RGB_dark']['Y'],
-                                               color_scheme['RGB_dark']['Z']],
-                                       annotations=[f'Zero Acc_{coord} = {np.round(np.mean(file_data[f'Acc_{coord}']), 5)}' for coord in coords])
 
             # Угловые скорости
-            canvas_config.y_data = [file_data[f'Gyro_{coord}'] for coord in coords]
-            canvas_config.suptitle = f'Фильтрованные величины угловых скоростей из файла {filename}'
+            canvas_config.y_data = [file_data[f'Gyro_{coord}'] for coord in self._coords]
+            canvas_config.suptitle = f'Обработанные величины угловых скоростей из файла {filename}'
             canvas_config.color_names = [color_scheme['COP_classic']['X'],
                                          color_scheme['COP_classic']['Y'],
                                          color_scheme['COP_classic']['Z']]
-            canvas_config.y_label = [f'Gyro_{coord}, mpgs' for coord in coords]
+            canvas_config.y_label = [f'Gyro_{coord}, mpgs' for coord in self._coords]
 
             plotter_Gyro = Plotter(canvas_config)
             plotter_Gyro.plotting_3d()
-            plotter_Gyro.plotting_hline(values=[np.mean(file_data[f'Gyro_{coord}']) for coord in coords],
-                                        colors=[color_scheme['COP_dark']['X'],
-                                                color_scheme['COP_dark']['Y'],
-                                                color_scheme['COP_dark']['Z']],
-                                        annotations=[f'Zero Gyro_{coord} = {np.round(np.mean(file_data[f'Acc_{coord}']), 5)}' for coord in coords])
+
             # Сохраним полученные графики
-            saving_path = f'{self._saving_dir}/Фильтрованные данные'
+            saving_path = f'{self._saving_dir}/Обработанные данные'
             if not os.path.exists(saving_path):
                 os.mkdir(saving_path)
 
@@ -434,43 +442,41 @@ class DataProcessing:
             plotter_Acc.save(f'{saving_path}/{name_of_file(filename, ".bin")}_Acc.png')
             plotter_Gyro.save(f'{saving_path}/{name_of_file(filename, ".bin")}_Gyro.png')
 
-    # -------------------------------
-
 ##########################################################
 
 if __name__ == '__main__':
     processing_params = {
         'File_Classification': {
 
-            # 'mode': 'auto_file_classification',
-            # 'kwargs': {
-            #     'template_init_filename': 'Init',
-            #     'template_measurement_filename': 'Measurement',
-            #     'template_measurement_buffer_filename': 'Measurement_Buffer'
-            # }
-
-            'mode': 'manual_file_classification',
+            'mode': 'auto_file_classification',
             'kwargs': {
-                'file_init': 'telega_2025-08-12_STM_Init.bin',
-                'files_measuring': [
-                   {'buffer': 'telega_2025-08-12_STM_Init.bin', 'data': 'telega_2025-08-12_STM_RawData_1.bin'}
-                ]
+                'template_init_filename': 'Init',
+                'template_measurement_filename': 'Measurement',
+                'template_measurement_buffer_filename': 'Measurement_Buffer'
             }
+
+            # 'mode': 'manual_file_classification',
+            # 'kwargs': {
+            #     'file_init': 'telega_2025-08-12_STM_Init.bin',
+            #     'files_measuring': [
+            #        {'buffer': 'telega_2025-08-12_STM_Init.bin', 'data': 'telega_2025-08-12_STM_RawData_1.bin'}
+            #     ]
+            # }
         },
         'Raw_Data': {
             'plotting_init_data': True,
-            'plotting_buffers_data': False,
+            'plotting_buffers_data': True,
             'plotting_raw_data': True,
             'kwargs': {'plot_filtered_data': True}
         },
         'Analysis': {
-            'plotting_filtered_data': False,
+            'plotting_analysed_data': True,
             'kwargs': {}
         }
 
     }
-    # dir_path = f'{CWD}/10.06.25_copy'
-    dir_path = f'{CWD}/test_rotation'
+    dir_path = f'{CWD}/10.06.25_copy'
+    # dir_path = f'{CWD}/test_rotation'
     files_ = [f for f in os.listdir(dir_path) if (os.path.isfile(os.path.join(dir_path, f)) and ('.bin' in f))]
 
     analyser = DataProcessing(dir_path, files_, processing_params)
