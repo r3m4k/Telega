@@ -182,11 +182,11 @@ class DataProcessing:
             if value and key != 'kwargs':
                 class_params[key](**user_params['kwargs'])
 
-    def _plotting_init_data(self):
+    def _plotting_init_data(self, **kwargs):
         print('Построение графиков данных выставки')
         self._plotting_static_data(self._file_init, f'{self._saving_dir}/Данные выставки датчиков')
 
-    def _plotting_buffers_data(self):
+    def _plotting_buffers_data(self, **kwargs):
         for i in range(len(self._files_measuring)):
             print(f'Построение графиков буферных данных из файла {self._files_measuring[i].buffer}')
 
@@ -312,7 +312,7 @@ class DataProcessing:
         canvas_config.x_label = 'Time, minutes'
         canvas_config.y_label = [f'Acc_{coord}, m / c**2' for coord in coords]
 
-        canvas_config.annotation = [f'Mean Acc_{coord} = {np.mean(file_data[f'Acc_{coord}']).round(3)}' for coord in coords]
+        canvas_config.annotation = [f'Mean Acc_{coord} = {np.mean(file_data[f'Acc_{coord}']).round(6)}' for coord in coords]
 
         plotter_Acc = Plotter(canvas_config)
         plotter_Acc.plotting_3d_static()
@@ -332,7 +332,7 @@ class DataProcessing:
 
         canvas_config.y_label = [f'Gyro_{coord}, mgps' for coord in coords]
 
-        canvas_config.annotation = [f'Mean Gyro_{coord} = {np.mean(file_data[f'Gyro_{coord}']).round(3)}' for coord in
+        canvas_config.annotation = [f'Mean Gyro_{coord} = {np.mean(file_data[f'Gyro_{coord}']).round(6)}' for coord in
                                     coords]
 
         plotter_Gyro = Plotter(canvas_config)
@@ -442,23 +442,23 @@ if __name__ == '__main__':
     processing_params = {
         'File_Classification': {
 
-            'mode': 'auto_file_classification',
-            'kwargs': {
-                'template_init_filename': 'Init',
-                'template_measurement_filename': 'Measurement',
-                'template_measurement_buffer_filename': 'Measurement_Buffer'
-            }
-
-            # 'mode': 'manual_file_classification',
+            # 'mode': 'auto_file_classification',
             # 'kwargs': {
-            #     'file_init': 'telega_2025-08-08_STM_Init.bin',
-            #     'files_measuring': [
-            #        {'buffer': 'telega_2025-08-08_STM_Init.bin', 'data': 'telega_2025-08-08_STM_RawData_1.bin'}
-            #     ]
+            #     'template_init_filename': 'Init',
+            #     'template_measurement_filename': 'Measurement',
+            #     'template_measurement_buffer_filename': 'Measurement_Buffer'
             # }
+
+            'mode': 'manual_file_classification',
+            'kwargs': {
+                'file_init': 'telega_2025-08-12_STM_Init.bin',
+                'files_measuring': [
+                   {'buffer': 'telega_2025-08-12_STM_Init.bin', 'data': 'telega_2025-08-12_STM_RawData_1.bin'}
+                ]
+            }
         },
         'Raw_Data': {
-            'plotting_init_data': False,
+            'plotting_init_data': True,
             'plotting_buffers_data': False,
             'plotting_raw_data': True,
             'kwargs': {'plot_filtered_data': True}
@@ -469,7 +469,8 @@ if __name__ == '__main__':
         }
 
     }
-    dir_path = f'{CWD}/10.06.25_copy'
+    # dir_path = f'{CWD}/10.06.25_copy'
+    dir_path = f'{CWD}/test_rotation'
     files_ = [f for f in os.listdir(dir_path) if (os.path.isfile(os.path.join(dir_path, f)) and ('.bin' in f))]
 
     analyser = DataProcessing(dir_path, files_, processing_params)
