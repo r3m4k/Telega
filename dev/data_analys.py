@@ -59,8 +59,49 @@ def linear_subtraction(array: np.typing.NDArray, final_value: float):
     line_coefficient = (array[-1] - final_value) / len(array)
     return array - line_coefficient * np.arange(len(array))
 
+def float_to_csv_format(value):
+    """
+    Перевод числа с плавающей точкой в строку для csv файла.
+    """
+    return str(round(value, 8)).replace(".", ",")
 
-##########################################################
+def writing_to_csv_file(titles: list[str], array_list: list[np.typing.NDArray], saving_dir: str, saving_name: str):
+    """
+    Сохранение данных в csv файл.
+    :param titles: список заголовков
+    :param array_list: список массивов с данными
+    :param saving_dir: директория сохранения итогового файла
+    :param saving_name: имя итогового файла
+    """
+    if len(titles) != len(array_list):
+        raise ValueError('titles and array_list have different number of elements!\n'
+                         f'len(titles) = {len(titles)}, len(array_list) = {len(array_list)}')
+
+    if not os.path.isdir(saving_dir):
+        raise FileNotFoundError(f'No such directory: {saving_dir}')
+
+    if '.csv' not in saving_name:
+        saving_name += '.csv'
+
+    csv_file = open(f'{saving_dir}/{saving_name}', 'w')
+
+    # Запишем заголовки
+    csv_file.write(titles[0])
+    for title in titles[1:]:
+        csv_file.write(f' {title}')
+    csv_file.write('\n')
+
+    # Запишем данные
+    for row in range(len(array_list[0])):
+        for col in range(len(array_list)):
+            if col == 0:
+                csv_file.write(float_to_csv_format(array_list[col][row]))
+            else:
+                csv_file.write(f' {float_to_csv_format(array_list[col][row])}')
+        csv_file.write('\n')
+
+    csv_file.close()
+
 
 class Decoder:
     """
