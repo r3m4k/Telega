@@ -1,6 +1,6 @@
 .idea
 dev/logs/
-dev/test.py
+
 *.log
 *.bin
 *.pyc
@@ -12,3 +12,5 @@ test_1/
 MyFilter/
 
 test_rotation/
+
+dev/test.py
