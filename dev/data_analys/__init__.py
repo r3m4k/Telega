@@ -13,7 +13,8 @@ from .utils import (
     cumulative_trapezoidal_integral,
     trapezoidal_integration,
     linear_subtraction,
-    writing_to_csv_file
+    writing_to_csv_file,
+    create_dir
 )
 
 from .rotation_analys import (
@@ -23,6 +24,7 @@ from .rotation_analys import (
 )
 
 from .filtering import Filter
+from .data_processing import DataProcessing
 
 # --------------------------------------------------------
 
@@ -33,6 +35,7 @@ __all__ = [
     'trapezoidal_integration',
     'linear_subtraction',
     'writing_to_csv_file',
+    'create_dir',
 
     # Из rotation_analys
     'RotatingFrameAnalyzer',
@@ -40,7 +43,10 @@ __all__ = [
     'Matrix',
 
     # Из filtering
-    'Filter'
+    'Filter',
+
+    # Из data_processing
+    'DataProcessing'
 ]
 
 # --------------------------------------------------------
