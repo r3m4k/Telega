@@ -2,8 +2,8 @@ import numpy as np
 
 # User imports
 from ..utils import trapezoidal_integration
-from matrix import Matrix
-from vector_3d import Vector
+from .matrix import Matrix
+from .vector_3d import Vector
 
 
 ##########################################################

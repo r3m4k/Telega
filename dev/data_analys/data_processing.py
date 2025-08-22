@@ -9,12 +9,12 @@ from pprint import pprint
 import numpy as np
 
 # User imports
-from utils import *
-from decoding import Decoder
-from filtering import Filter
+from .utils import *
+from .decoding import Decoder
+from .filtering import Filter
 from .rotation_analys import RotatingFrameAnalyzer
-from ..consts import Moscow_coordinates, color_scheme
-from ..plotting import CanvasConfig, Plotter
+from dev.consts import Moscow_coordinates, color_scheme
+from dev.plotting import CanvasConfig, Plotter
 
 ##########################################################
 
@@ -175,105 +175,40 @@ class DataProcessing:
                 class_params[key](**user_params['kwargs'])
 
     def _plotting_init_data(self, **kwargs):
+        """
+        Создание графиков данных выставки датчиков
+        """
         print('Построение графиков данных выставки')
         self._plotting_static_data(self._file_init, f'{self._saving_dir}/Данные выставки датчиков')
 
     def _plotting_buffers_data(self, **kwargs):
-        for i in range(len(self._files_measuring)):
-            print(f'Построение графиков буферных данных из файла {self._files_measuring[i].buffer}')
+        """
+        Создание графиков буферных данных
+        """
+        for measuring_pair in self._files_measuring:
+            print(f'Построение графиков буферных данных из файла {measuring_pair.buffer}')
 
             # Создадим директорию {self._saving_dir}/Данные проездов/<название файла с данными проезда>
-            saving_path = f'{self._saving_dir}/Данные проездов'
-            if not os.path.exists(saving_path):
-                os.mkdir(saving_path)
-
-            saving_path += f'/{name_of_file(self._files_measuring[i].data, ".bin")}'
-            if not os.path.exists(saving_path):
-                os.mkdir(saving_path)
+            saving_path = create_dir(base_dir=self._saving_dir,
+                                     sub_dir=f'Данные проездов/{name_of_file(measuring_pair.data, ".bin")}')
 
             # Построим графики
-            self._plotting_static_data(self._files_measuring[i].buffer, saving_path)
+            self._plotting_static_data(measuring_pair.buffer, saving_path)
 
-    def _plotting_raw_data(self, plot_filtered_data: bool = False):
+    def _plotting_raw_data(self, plot_filtered_data: bool = False, **kwargs):
         """
         Создание графиков исходных данных, прочитанных из файлов self._files_measuring[_].data
         """
         for measuring_pair in self._files_measuring:
             filename = measuring_pair.data
             print(f'Построение данных из файла {filename}')
-            file_data = self._received_data[filename]
 
-            # Построение графиков температуры и абсолютных величин ускорения и угловых скоростей
-            canvas_config = CanvasConfig()
+            # Создадим директорию {self._saving_dir}/Данные проездов/<название файла с данными проезда>
+            saving_path = create_dir(base_dir=self._saving_dir,
+                                     sub_dir=f'Данные проездов/{name_of_file(measuring_pair.data, ".bin")}')
 
-            canvas_config.n_rows = 3; canvas_config.n_cols = 1
-
-            canvas_config.x_data = file_data['Time'] / 60
-            canvas_config.y_data = [np.sqrt(file_data[f'Acc_X'] ** 2 + file_data[f'Acc_Y'] ** 2 + file_data[f'Acc_Z'] ** 2),
-                                 np.sqrt(file_data[f'Gyro_X'] ** 2 + file_data[f'Gyro_Y'] ** 2 + file_data[f'Gyro_Z'] ** 2),
-                                 file_data['Temp']]
-            canvas_config.suptitle = f'Величины температуры и абсолютных величин ускорения и угловых скоростей из файла {filename}'
-            canvas_config.color_names = [color_scheme['ABS_values']['Acc'],
-                                         color_scheme['ABS_values']['Gyro'],
-                                         color_scheme['ABS_values']['Temp']]
-            canvas_config.x_label = 'Time, minutes'
-            canvas_config.y_label = ['acceleration, m / c**2', 'angular velocity, mgps', 'temperature, ---']
-
-            plotter_Abs = Plotter(canvas_config)
-            plotter_Abs.plotting_3d()
-
-
-            # Построение графиков ускорений
-            canvas_config.suptitle = f'Величины ускорений из файла {filename}'
-            canvas_config.y_data = [file_data[f'Acc_{coord}'] for coord in self._coords]
-            canvas_config.color_names = [color_scheme['RGB_classic']['X'],
-                                         color_scheme['RGB_classic']['Y'],
-                                         color_scheme['RGB_classic']['Z']]
-            canvas_config.y_label = [f'Acc_{coord}, m / c**2' for coord in self._coords]
-
-            plotter_Acc = Plotter(canvas_config)
-            plotter_Acc.plotting_3d()
-
-            if plot_filtered_data:
-                plotter_Acc.canvas.plot(file_data['Time'] / 60,
-                                        [Filter(file_data[f'Acc_{coord}']).get_filtered_data() for coord in self._coords],
-                                        color_names=[color_scheme['RGB_dark']['X'],
-                                                     color_scheme['RGB_dark']['Y'],
-                                                     color_scheme['RGB_dark']['Z']],
-                                        linewidth=2.5)
-
-            # Построение графиков угловых скоростей
-            canvas_config.suptitle = f'Величины угловых скоростей из файла {filename}'
-            canvas_config.y_data = [file_data[f'Gyro_{coord}'] for coord in self._coords]
-            canvas_config.color_names = [color_scheme['COP_classic']['X'],
-                                         color_scheme['COP_classic']['Y'],
-                                         color_scheme['COP_classic']['Z']]
-            canvas_config.line_kwargs['linewidth'] = 2.0
-            canvas_config.y_label = [f'Gyro_{coord}, mpgs' for coord in self._coords]
-
-            plotter_Gyro = Plotter(canvas_config)
-            plotter_Gyro.plotting_3d()
-
-            if plot_filtered_data:
-                plotter_Gyro.canvas.plot(file_data['Time'] / 60,
-                                         [Filter(file_data[f'Gyro_{coord}']).get_filtered_data() for coord in self._coords],
-                                         color_names=[color_scheme['COP_dark']['X'],
-                                                      color_scheme['COP_dark']['Y'],
-                                                      color_scheme['COP_dark']['Z']],
-                                         linewidth=2.5)
-
-            # Сохраним полученные графики
-            saving_path = f'{self._saving_dir}/Данные проездов'
-            if not os.path.exists(saving_path):
-                os.mkdir(saving_path)
-
-            saving_path += f'/{name_of_file(filename, ".bin")}'
-            if not os.path.exists(saving_path):
-                os.mkdir(saving_path)
-
-            plotter_Abs.save(f'{saving_path}/{name_of_file(filename, ".bin")}_Abs.png')
-            plotter_Acc.save(f'{saving_path}/{name_of_file(filename, ".bin")}_Acc.png')
-            plotter_Gyro.save(f'{saving_path}/{name_of_file(filename, ".bin")}_Gyro.png')
+            # Построим графики
+            self._plotting_dynamic_data(filename, saving_path, plot_filtered_data)
 
     def _plotting_static_data(self, filename: str, saving_path: str = None):
         """
@@ -327,11 +262,89 @@ class DataProcessing:
         plotter_Gyro = Plotter(canvas_config)
         plotter_Gyro.plotting_3d_static()
 
-        if saving_path:
-            if not os.path.exists(saving_path):
-                os.mkdir(saving_path)
-            plotter_Acc.save(f'{saving_path}/{name_of_file(filename, ".bin")}_Acc.png')
-            plotter_Gyro.save(f'{saving_path}/{name_of_file(filename, ".bin")}_Gyro.png')
+        # Сохраним полученные графики
+        if not os.path.exists(saving_path):
+            os.mkdir(saving_path)
+
+        plotter_Acc.save(f'{saving_path}/{name_of_file(filename, ".bin")}_Acc.png')
+        plotter_Gyro.save(f'{saving_path}/{name_of_file(filename, ".bin")}_Gyro.png')
+
+    def _plotting_dynamic_data(self, filename: str, saving_path: str, plot_filtered_data: bool):
+        """
+
+        :param filename:
+        :param plot_filtered_data:
+        :return:
+        """
+
+        file_data = self._received_data[filename]
+
+        # Построение графиков температуры и абсолютных величин ускорения и угловых скоростей
+        canvas_config = CanvasConfig()
+
+        canvas_config.n_rows = 3; canvas_config.n_cols = 1
+
+        canvas_config.x_data = file_data['Time'] / 60
+        canvas_config.y_data = [np.sqrt(file_data[f'Acc_X'] ** 2 + file_data[f'Acc_Y'] ** 2 + file_data[f'Acc_Z'] ** 2),
+                                np.sqrt(
+                                    file_data[f'Gyro_X'] ** 2 + file_data[f'Gyro_Y'] ** 2 + file_data[f'Gyro_Z'] ** 2),
+                                file_data['Temp']]
+        canvas_config.suptitle = f'Величины температуры и абсолютных величин ускорения и угловых скоростей из файла {filename}'
+        canvas_config.color_names = [color_scheme['ABS_values']['Acc'],
+                                     color_scheme['ABS_values']['Gyro'],
+                                     color_scheme['ABS_values']['Temp']]
+        canvas_config.x_label = 'Time, minutes'
+        canvas_config.y_label = ['acceleration, m / c**2', 'angular velocity, mgps', 'temperature, ---']
+
+        plotter_Abs = Plotter(canvas_config)
+        plotter_Abs.plotting_3d()
+
+        # Построение графиков ускорений
+        canvas_config.suptitle = f'Величины ускорений из файла {filename}'
+        canvas_config.y_data = [file_data[f'Acc_{coord}'] for coord in self._coords]
+        canvas_config.color_names = [color_scheme['RGB_classic']['X'],
+                                     color_scheme['RGB_classic']['Y'],
+                                     color_scheme['RGB_classic']['Z']]
+        canvas_config.y_label = [f'Acc_{coord}, m / c**2' for coord in self._coords]
+
+        plotter_Acc = Plotter(canvas_config)
+        plotter_Acc.plotting_3d()
+
+        if plot_filtered_data:
+            plotter_Acc.canvas.plot(file_data['Time'] / 60,
+                                    [Filter(file_data[f'Acc_{coord}']).get_filtered_data() for coord in self._coords],
+                                    color_names=[color_scheme['RGB_dark']['X'],
+                                                 color_scheme['RGB_dark']['Y'],
+                                                 color_scheme['RGB_dark']['Z']],
+                                    linewidth=2.5)
+
+        # Построение графиков угловых скоростей
+        canvas_config.suptitle = f'Величины угловых скоростей из файла {filename}'
+        canvas_config.y_data = [file_data[f'Gyro_{coord}'] for coord in self._coords]
+        canvas_config.color_names = [color_scheme['COP_classic']['X'],
+                                     color_scheme['COP_classic']['Y'],
+                                     color_scheme['COP_classic']['Z']]
+        canvas_config.line_kwargs['linewidth'] = 2.0
+        canvas_config.y_label = [f'Gyro_{coord}, mpgs' for coord in self._coords]
+
+        plotter_Gyro = Plotter(canvas_config)
+        plotter_Gyro.plotting_3d()
+
+        if plot_filtered_data:
+            plotter_Gyro.canvas.plot(file_data['Time'] / 60,
+                                     [Filter(file_data[f'Gyro_{coord}']).get_filtered_data() for coord in self._coords],
+                                     color_names=[color_scheme['COP_dark']['X'],
+                                                  color_scheme['COP_dark']['Y'],
+                                                  color_scheme['COP_dark']['Z']],
+                                     linewidth=2.5)
+
+        # Сохраним полученные графики
+        if not os.path.exists(saving_path):
+            os.mkdir(saving_path)
+
+        plotter_Abs.save(f'{saving_path}/{name_of_file(filename, ".bin")}_Abs.png')
+        plotter_Acc.save(f'{saving_path}/{name_of_file(filename, ".bin")}_Acc.png')
+        plotter_Gyro.save(f'{saving_path}/{name_of_file(filename, ".bin")}_Gyro.png')
 
     # -------------------------------
     # Обработка исходных данных

@@ -1,6 +1,5 @@
 import numpy as np
 
-from vector_3d import Vector
 
 class Matrix:
     """
@@ -13,6 +12,8 @@ class Matrix:
     # Математические операторы
     # -------------------------------
     def __mul__(self, multiplier):
+        from .vector_3d import Vector
+
         if isinstance(multiplier, Matrix):
             self._matrix = np.dot(self._matrix, multiplier._matrix)
             return None
@@ -90,6 +91,8 @@ class Matrix:
         :parameter gyro: Vector - вектор угловой скорости
         :parameter latitude_degree: float - значение широты в градусах
         """
+        from .vector_3d import Vector
+
         if (not isinstance(acc, Vector)) or (not isinstance(gyro, Vector)):
             raise TypeError('Acc and Gyro must be of type Vector')
 

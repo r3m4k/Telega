@@ -21,9 +21,9 @@ from .proxy import (
     DecodeProxy
 )
 
-from com_port import COM_Port
+from .com_port import COM_Port
 
-from com_port_gui import (
+from .com_port_gui import (
     STM_ComPort,
     GPS_ComPort
 )

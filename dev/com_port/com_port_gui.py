@@ -10,10 +10,10 @@ from PyQt5.QtCore import QObject, pyqtSignal
 
 
 # User imports
-from constaints import BAUDRATE
-from proxy import MyManager, COM_PortProxy, DecodeProxy
-from com_port import COM_Port
-from decoder import Decoder
+from .constaints import BAUDRATE
+from .proxy import MyManager, COM_PortProxy, DecodeProxy
+from .com_port import COM_Port
+from .decoder import Decoder
 from ..printing import Printing
 
 ##########################################################

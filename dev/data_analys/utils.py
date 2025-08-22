@@ -14,7 +14,8 @@ __all__ = [
     'cumulative_trapezoidal_integral',
     'trapezoidal_integration',
     'linear_subtraction',
-    'writing_to_csv_file'
+    'writing_to_csv_file',
+    'create_dir'
 ]
 
 ##########################################################
@@ -111,5 +112,21 @@ def writing_to_csv_file(titles: list[str], array_list: list[np.typing.NDArray], 
         csv_file.write('\n')
 
     csv_file.close()
+
+# --------------------------------------------------------
+
+def create_dir(base_dir: str, sub_dir: str) -> str:
+    """
+    Функция для создания вложенных директорий в базовой
+    :return: абсолютный путь base_dir/sub_dir
+    """
+    path = base_dir
+    sub_dir_list = sub_dir.split('/')
+    for _dir in sub_dir_list:
+        path += _dir
+        if not os.path.exists(path):
+            os.mkdir(path)
+
+    return path
 
 # --------------------------------------------------------

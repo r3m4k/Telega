@@ -1,6 +1,6 @@
 import numpy as np
 
-from matrix import Matrix
+from .matrix import Matrix
 
 class Vector:
     """

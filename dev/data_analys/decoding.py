@@ -3,11 +3,13 @@ import os
 from enum import Enum
 import binascii
 from typing import BinaryIO
+import json
 
 # External imports
 import numpy as np
 
 # User imports
+from dev.consts import JSON_FILE
 
 
 ##########################################################

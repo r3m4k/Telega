@@ -6,8 +6,8 @@ import numpy as np
 from matplotlib.axes import Axes
 
 # User imports
-from canvas import Canvas
-from canvas_config import CanvasConfig
+from .canvas import Canvas
+from .canvas_config import CanvasConfig
 
 ##########################################################
 
