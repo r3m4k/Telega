@@ -6,7 +6,8 @@ def message(text, icon='NoIcon'):
     """
     Отправка пользователю сообщения
     """
-    QtIcon: QMessageBox
+    QtIcon: int = QMessageBox.NoIcon
+
     if icon == 'NoIcon':
         QtIcon = QMessageBox.NoIcon
     elif icon in ['Warning', '!']:
