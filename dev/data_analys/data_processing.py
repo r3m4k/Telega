@@ -210,6 +210,8 @@ class DataProcessing:
             # Построим графики
             self._plotting_dynamic_data(filename, saving_path, plot_filtered_data)
 
+    # -------------------------------
+
     def _plotting_static_data(self, filename: str, saving_path: str = None):
         """
         Создание графиков и распределений величин из filename
@@ -271,10 +273,8 @@ class DataProcessing:
 
     def _plotting_dynamic_data(self, filename: str, saving_path: str, plot_filtered_data: bool):
         """
-
-        :param filename:
-        :param plot_filtered_data:
-        :return:
+        Построение графиков данных из файла filename.
+        Флаг plot_filtered_data указывает необходимость построения на одном графике отфильтрованных данных.
         """
 
         file_data = self._received_data[filename]
