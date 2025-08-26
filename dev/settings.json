@@ -1,1 +1,0 @@
-{"DataCollecting": {"dir": "D:/Job/Telega/test_rotation", "stm_hwid": "USB VID:PID=0483:5740 SER=2061336D5333 LOCATION=1-2.3:x.2"}, "Decoder": {"header": [126, 231], "titles": ["Time", "Acc_X", "Acc_Y", "Acc_Z", "Gyro_X", "Gyro_Y", "Gyro_Z", "Temp"], "value_coefficients": [0.25, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.01]}}
