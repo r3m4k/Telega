@@ -50,3 +50,9 @@ class Coordinates(NamedTuple):
     longitude: float
 
 Moscow_coordinates = Coordinates(latitude=55.753960, longitude=37.620393)
+
+
+# -------------------------------
+# Константы для работы с COM-портами
+# -------------------------------
+BAUDRATE = {"STM": 115200, "GPS": 4800}       # Скорость работы COM порта
