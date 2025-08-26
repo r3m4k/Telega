@@ -1,5 +1,4 @@
 # System imports
-import os
 import traceback
 from time import sleep
 from typing import Callable
@@ -57,20 +56,8 @@ class COM_Port:
                 self._msg_queue.put(f'Error__Ошибка открытия {com_port_name}')
                 return
 
-            try:
-                if command != '':
-                    # Отправим команду по COM порту
-                    sending_status, command_function = self.decode_Command(command, msg_queue)
-                    if not sending_status:
-                        return
-
-            except serial.serialutil.SerialException or RuntimeError:
-                msg_queue.put(f'Warning__\n{traceback.format_exc()}')
-                msg_queue.put(f'Error__Ошибка отправки команды по {com_port_name}')
-                return
-
-            command_function(data_queue, command_pipe, msg_queue)
-
+            command_execution: Callable[..., None] = self.decode_command(command)
+            command_execution()
 
         except Exception as error:
             msg_queue.put(f'Critical__\n{error}\n{traceback.format_exc()}')
@@ -78,6 +65,21 @@ class COM_Port:
     def decode_command(self, command: str) -> Callable[..., None]:
         receive_command = command.split('__')[1]
 
+        # Если полученная команда подразумевает предварительное сообщение по com порту, то отправим его.
+        # Пока что при выполнении всех полученных команд из родительского процесса требуется отправка команды по com порту,
+        # но это не обязательно, в общем случае
+        if receive_command in self._commands:
+            try:
+                self.send_Command(receive_command)
+
+            except serial.serialutil.SerialException or RuntimeError:
+                self._msg_queue.put(f'Warning__\n{traceback.format_exc()}')
+                self._msg_queue.put(f'Error__Ошибка отправки команды по {self._port.name}')
+
+            except Exception as error:
+                self._msg_queue.put(f'Error__\n{error}\n{traceback.format_exc()}')
+
+        # Вернём функцию, которая отвечает за выполнение полученной команды
         match receive_command:
             case 'restart':
                 return self.foo_function
@@ -87,48 +89,6 @@ class COM_Port:
                 return self.reading_ComPort
             case _:
                 return self.foo_function
-
-    def reading_ComPort(self, data_queue: Queue, command_pipe: Pipe, msg_queue: Queue):
-        # Начнём чтение данных
-        msg_queue.put(f'Info__Начало чтения данных из {self._port.port}')
-        try:
-            while True:
-                if not command_pipe.poll():
-                    # Если нет поступивших команд, то читаем данные из СOM порта
-                    data_queue.put(self._port.read(1))
-                else:
-                    _ = self.decode_Command(str(command_pipe.recv()), msg_queue)
-                    break  # Остановим чтение из com порта
-
-        except SerialException:
-            msg_queue.put(f'Warning__{traceback.format_exc()}')
-            msg_queue.put(f'Error__Ошибка чтения порта {self._port.port}')
-
-    def decode_Command(self, command: str, msg_queue: Queue) -> (bool, Callable):
-        sending_status = False
-        try:
-            receive_command = command.split('__')[1]
-            if receive_command in self._commands:
-                sending_status = self.send_Command(receive_command, msg_queue)
-            else:
-                msg_queue.put(f'Warning__Команда не распознана')
-                return sending_status, self.foo_function
-
-            match receive_command:
-                case 'restart':
-                    return sending_status, self.foo_function
-                case 'start_Measuring':
-                    return sending_status, self.reading_ComPort
-                case 'start_InitialSetting':
-                    return sending_status, self.reading_ComPort
-                case _:
-                    return False, self.foo_function
-
-
-        except Exception:
-            msg_queue.put(f'Warning__Неправильно передана команда {command}')
-            raise RuntimeError('Неправильно передана команда')
-        return False    # Если произошла ошибка, то вернём False
 
     def send_Command(self, command: str):
         self._msg_queue.put(f'Info__Отправка команды {command} по {self._port.port}')
@@ -141,6 +101,23 @@ class COM_Port:
             self._msg_queue.put('Info__Команда успешно принята устройством')
         else:
             self._msg_queue.put(f'Warning__Ошибка чтения команды устройством\n{msg}')
+            raise RuntimeError('Команда не опознана устройством')
+
+    def reading_ComPort(self):
+        # Начнём чтение данных
+        self._msg_queue.put(f'Info__Начало чтения данных из {self._port.port}')
+        try:
+            while True:
+                if not self._command_pipe.poll():
+                    # Если нет поступивших команд, то читаем данные из СOM порта
+                    self._data_queue.put(self._port.read(1))
+                else:
+                    _ = self.decode_command(str(self._command_pipe.recv()))
+                    break  # Остановим чтение из com порта
+
+        except SerialException:
+            self._msg_queue.put(f'Warning__{traceback.format_exc()}')
+            self._msg_queue.put(f'Error__Ошибка чтения порта {self._port.port}')
 
 
     def foo_function(self):

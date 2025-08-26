@@ -8,7 +8,6 @@ __author__ = 'Roman Romanovskiy'
 
 # --------------------------------------------------------
 
-from .constaints import BAUDRATE
 from .utils import get_ComPorts
 
 from .decoder import (

@@ -10,11 +10,11 @@ from PyQt5.QtCore import QObject, pyqtSignal
 
 
 # User imports
-from .constaints import BAUDRATE
 from .proxy import MyManager, COM_PortProxy, DecodeProxy
 from .com_port import COM_Port
 from .decoder import Decoder
-from ..printing import Printing
+from dev.printing import Printing
+from dev.consts import BAUDRATE
 
 ##########################################################
 
@@ -168,6 +168,7 @@ class COM_Port_GUI(QObject):
     def _command_execution(self, command):
         pass
 
+
 class STM_ComPort(COM_Port_GUI):
     """
     Класс для управления платой STM32 через COM порт
@@ -212,7 +213,7 @@ class STM_ComPort(COM_Port_GUI):
             # Если процессы не созданы, то создадим его с первоначальной командой на перезапуск
             self._start_Processes('Command__restart')
 
-        sleep(0.4)  # Для корректного завершения процессов
+        sleep(0.5)  # Для корректного завершения процессов
         self._stop_Processes()
         self.printer.printing('Перезапуск платы\n'
                               '#######################')
