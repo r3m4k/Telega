@@ -1,2 +1,7 @@
 
 KiCad/Telega_KiCad-backups/
+
+
+.idea/
+
+*.pyc
