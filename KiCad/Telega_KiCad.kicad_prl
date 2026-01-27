@@ -88,15 +88,15 @@
       9
     ],
     "col_widths": [
-      8,
-      8,
-      8,
-      8,
-      8,
-      8,
-      8,
-      8,
-      8,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
       104
     ],
     "custom_group_rules": [],
@@ -115,8 +115,8 @@
   "project": {
     "files": [
       {
-        "name": "Telega_KiCad.kicad_sch",
-        "open": true,
+        "name": "Telega_KiCad.kicad_pcb",
+        "open": false,
         "window": {
           "display": 0,
           "maximized": true,
@@ -124,18 +124,6 @@
           "pos_y": -9,
           "size_x": 1938,
           "size_y": 1038
-        }
-      },
-      {
-        "name": "Telega_KiCad.kicad_pcb",
-        "open": false,
-        "window": {
-          "display": 1,
-          "maximized": true,
-          "pos_x": -1928,
-          "pos_y": -8,
-          "size_x": 1936,
-          "size_y": 1048
         }
       }
     ]
