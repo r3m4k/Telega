@@ -11,17 +11,12 @@ USER_DEFINES =
 # Исходные файлы пользователя
 # ----------------------------
 
-USER_DIR = src
+USER_DIR = ${SOURCE_DIR}/user/src
 
 USER_SRC_C = \
-${USER_DIR}/Sensors.c \
-${USER_DIR}/_write.c
 
 USER_SRC_CPP = \
 ${USER_DIR}/main.cpp \
-${USER_DIR}/Drv_Gpio.cpp \
-${USER_DIR}/Drv_Uart.cpp \
-${USER_DIR}/COM_IO.cpp
  
 # ----------------------------
 # Объектные файлы пользователя
@@ -44,12 +39,12 @@ ${USER_OBJ_DIR}/%.opp: ${USER_DIR}/%.cpp
 
 # ---------------------------
 
-build_user: ${USER_OBJ} linking
+__build_user: ${USER_OBJ}
 
-clean_user:
+__rebuild_user: __clean_user __build_user
+
+__clean_user:
 	@echo Deleting user's object files and generated files
 	@rm -f ${USER_OBJ} ${BIN_PLACE}/${BINARY} ${BIN_PLACE}/${PROGRAM_NAME}.hex ${BIN_PLACE}/${PROGRAM_NAME}.map
-
-rebuild_user: clean_user build_user
 
 # --------------------------------

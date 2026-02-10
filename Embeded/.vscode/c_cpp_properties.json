@@ -2,10 +2,14 @@
     "configurations": [
         {
             "name": "ARM",            
-            // "includePath": [],// здесь не требуются, т.к. работает configurationProvider
+            "includePath": [
+                "${workspaceFolder}/**",
+                "C:/SysGCC/arm-eabi/arm-none-eabi/include"
+            ],
             //"defines": [], // здесь не требуются, т.к. работает configurationProvider
             "compilerPath": "C:/SysGCC/arm-eabi/bin/arm-none-eabi-g++.exe",
             "cStandard": "c11",
+            "cppStandard": "c++17",
             "intelliSenseMode": "gcc-arm",
             "configurationProvider": "ms-vscode.makefile-tools" // при включении конфигурации ms-vscode.makefile-tools - 
                                                                 // раскраска #define-ов в тексте С/С++ происходит на основе  

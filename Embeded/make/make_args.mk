@@ -7,22 +7,26 @@
 # Зададим её тут, чтобы при запуске makefile из командной строки не задавать её
 SYSTEM := windows	
 
-PROGRAM_NAME = STM_ACC_GIRO_FILTERED
+# Названеи проекта
+PROGRAM_NAME := STM_PROJECT
+
+# Директория с исходным кодом относительно Makefile.mk
+SOURCE_DIR = D:/Job/STM_Gyronavt
 
 # Название итогового исполняемого файла
 BINARY = ${PROGRAM_NAME}.elf
 
 # Место хранения полученных объектных файлов
 ifeq ($(SYSTEM), windows)
-	BIN_PLACE = Debug_Win
+	BIN_PLACE = ${SOURCE_DIR}/Debug_Win
 else ifeq ($(SYSTEM), linux)
-	BIN_PLACE = Debug_Lin
+	BIN_PLACE = ${SOURCE_DIR}/Debug_Lin
 else
     $(error The OS is not specified)
 endif
 
 ifeq ($(SYSTEM), windows)
-	GCC_PLACE = c:/SysGCC/arm-eabi
+	GCC_PLACE = C:/SysGCC/arm-eabi
 else ifeq ($(SYSTEM), linux)
 	GCC_PLACE = /home/mike/gcc-arm-none-eabi-8-2019-q3-update/
 else
@@ -52,27 +56,36 @@ GCC_FLAGS = -std=gnu11 ${COMPILER_FLAGS} -c
 
 # флаги для g++
 # GPP_FLAGS = -std=gnu++11 ${COMPILER_FLAGS} -c -fabi-version=0 -fno-exceptions -fno-rtti -fno-use-cxa-atexit -fno-threadsafe-statics
-GPP_FLAGS = -std=gnu++11 ${COMPILER_FLAGS} -c -fno-exceptions -fno-rtti -fno-use-cxa-atexit -fno-threadsafe-statics
+GPP_FLAGS = -std=gnu++2a ${COMPILER_FLAGS} -c -fno-exceptions -fno-rtti -fno-use-cxa-atexit -fno-threadsafe-statics
 
 # библиотеки компоновщика - должны быть последними в списке команды компоновщика
 # C:\SysGCC\arm-eabi\arm-none-eabi\lib\libm.a
 # LIBS = -L${GCC_PLACE}arm-none-eabi/lib/arm/v5te/hard -lm 
 
 INCLUDES = \
--I"${GCC_PLACE}arm-none-eabi/include" \
--I"include" \
--I"src" \
--I"system/include" \
--I"system/include/cmsis" \
--I"system/include/stm32f3-stdperiph" \
--I"system/include/additionally" \
--I"system/USB_LIB/include"
+-I"${GCC_PLACE}/arm-none-eabi/include" \
+-I"${SOURCE_DIR}/include" \
+-I"${SOURCE_DIR}/user" \
+-I"${SOURCE_DIR}/user/inc" \
+-I"${SOURCE_DIR}/user/inc/aaa_Project_Files" \
+-I"${SOURCE_DIR}/user/inc/aaa_Project_Files/DataFilters" \
+-I"${SOURCE_DIR}/user/inc/Common" \
+-I"${SOURCE_DIR}/user/inc/CommunicationInterfaces" \
+-I"${SOURCE_DIR}/user/inc/DataContainers" \
+-I"${SOURCE_DIR}/user/inc/Packages" \
+-I"${SOURCE_DIR}/user/inc/Periph" \
+-I"${SOURCE_DIR}/user/inc/Timers" \
+-I"${SOURCE_DIR}/system/include" \
+-I"${SOURCE_DIR}/system/include/cmsis" \
+-I"${SOURCE_DIR}/system/include/stm32f3-stdperiph" \
+-I"${SOURCE_DIR}/system/include/additionally" \
+-I"${SOURCE_DIR}/system/USB_LIB/include"
 
 # флаги для линковщика
 LINK_FLAGS = ${COMPILER_FLAGS} \
--T "ldscripts/mem.ld" \
--T "ldscripts/libs.ld" \
--T "ldscripts/sections.ld" \
+-T "${SOURCE_DIR}/ldscripts/mem.ld" \
+-T "${SOURCE_DIR}/ldscripts/libs.ld" \
+-T "${SOURCE_DIR}/ldscripts/sections.ld" \
 -L"${PROJ}ldscripts" \
 -nostartfiles -Xlinker --gc-sections -Wl,-Map,${BIN_PLACE}/${PROGRAM_NAME}.map # --specs=nano.specs 
 

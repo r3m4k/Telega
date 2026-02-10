@@ -1,12 +1,20 @@
-/* Includes ------------------------------------------------------------------*/
+/* Includes H files ----------------------------------------------------------*/
+#include "main.h"
 #include "Drv_Gpio.h"
 #include "Drv_Uart.h"
 
-#include "main.h"
-
 /* Includes HPP files --------------------------------------------------------*/
-#include "COM_Port.hpp"
-#include "Measure.hpp"
+#include "Consts.hpp"
+#include "GPTimers.hpp"
+#include "Leds.hpp"
+#include "L3GD20.hpp"
+#include "LSM303DLHC.hpp"
+#include "GyronavtPackage.hpp"
+#include "ComPort.hpp"
+#include "USART.hpp"
+#include "CommandProcessing.hpp"
+#include "GpioPort.hpp"
+#include "GpioPin.hpp"
 
 // ----------------------------------------------------------------------------
 //
@@ -36,42 +44,85 @@ __IO uint8_t buttonState;
 #define PI 3.14159265358979f
 #define TIM_PRESCALER      720          // При таком предделителе таймера получается один тик таймера на 10 мкс
 #define TIM_PERIOD         25000        // Количество тиков таймера с частотой 10 кГц перед вызовом прерывания --> 250 мс период
+
 // ----------------------------------------------------------------------------
 // Сообщения, которые будем отправлять в ответ по COM порту (определены в COM_Port.hpp)
 extern uint8_t ErrorMessage[MaxCommand_Length];
 extern uint8_t ConfirmMessage[MaxCommand_Length];
 extern uint8_t EndOfInitialSetting[MaxCommand_Length];
 
-float gyro_multiplier;             // Множитель для данных с гироскопа
 // -------------------------------------------------------------------------------
+
 // Перечисление для стадии выполнения программы
-enum Stages{BeforeBeginning, FooStage, InitialSetting, Measuring};
-unsigned int stage = FooStage;
-unsigned int previous_stage = BeforeBeginning;
+enum class ProgramStages{
+    BeforeBeginning,    // Фиктивная стадия программы (необходима для индикации первой смены стадии программы)
+    FooStage,           // Данные с датчиков считываются, но не фильтруются и не отправляются
+    InitialSetting,     // Сбор и отправка данных для выставки 
+    Measuring           // Сбор и отправка данных с частотой 4 Гц
+};
 
-// Перечисление, используемое при декодировании полученных сообщений по com порту
-enum DecodeStages{Want7E, WantE7, WantFormat, WantData, WantConSum};
-unsigned int decode_stage = Want7E;
+// Тк будем менять стадии программы из других файлов, то разместим стадии в глобальной зоне видимости
+auto stage = ProgramStages::FooStage;
+auto previous_stage = ProgramStages::BeforeBeginning;
 
-// -------------------------------------------------------------------------------
-// Создадим экземпляры классов системы STM в глобальной зоне видимости 
-COM_Port COM_port;
+// ----------------------------------------------------------------------------
 
-// -------------------------------------------------------------------------------
+
+
+// ----------------------------------------------------------------------------
+
+using namespace STM_CppLib;
+
+// Периферия
+Leds leds;                          // Светодиоды на плате
+L3GD20 gyro_sensor;                 // Встроенный гироскоп
+LSM303DLHC acc_sensor;              // Встроенный датчик с акселерометром,
+                                    // магнитным и температурным датчиками
+
+// Интерфейсы связи
+ComPort com_port;
+
+// Используемые таймеры
+STM_Timer::Timer3<send_package> timer3;   // Основной таймер, запускающий чтение и отправку данных 
+STM_Timer::Timer4<[](){
+    leds.ChangeLedStatus(LED6);
+    leds.ChangeLedStatus(LED7);
+}> timer4;   // Таймер для мерцания светодиодами LED6, LED7
+
 // Пользовательские экземпляры классов
 Measure measure(55.7522 * PI / 180, TIM_PERIOD * 0.00001);
+
+// ----------------------------------------------------------------------------
+
+uint32_t tick_counter = 0;      // Счётчик тиков основного таймера
 
 // -------------------------------------------------------------------------------
 
 int main()
 {
+    // ##########################
+
+    // Загрузим собственную таблицу прерываний
     __disable_irq();
+
+    // Скопируем исходную таблицу прерываний
+    for(uint8_t i = 0; i < IST_VECTORS_NUM; i++){
+        __user_vector_table[i] = __isr_vectors[i];
+    }
+
+    SCB->VTOR = (uint32_t)__user_vector_table;
+
+    __DSB();
+    __ISB();
+
     __enable_irq();
 
 	RCC_GetClocksFreq(&RCC_Clocks);
 	if (SysTick_Config(RCC_Clocks.HCLK_Frequency / 1000))
-		while(1);       //will end up in this infinite loop if there was an error with Systick_Config
+		while(true) {}     //will end up in this infinite loop if there was an error with Systick_Config
     
+    // ##########################
+
     // Инициализируем всё оборудования
     InitAll();             
     
@@ -79,12 +130,20 @@ int main()
     Toggle_Leds();
    
     // Основной цикл программы
-    while (TRUE)
+    while (true)
     {
-        // Вызов функции из очереди при заполненной очереди для отладки программы
+        // Проверка очереди поступивших команд 
         if (!(COM_port.command_queue.isEmpty())){
             COM_port.command_queue.get()();
+            // TODO: создать класс для поступивших команд с методом execute для запуска выполнения команды
         }
+
+        /*
+        ШАБЛОН ОТРАБОТКИ СТАДИИ ПРОГРАММЫ:
+        Каждая стадия (stage) отрабатывается по единому принципу:
+        1. ИНИЦИАЛИЗАЦИЯ СТАДИИ (однократное выполнение при входе в стадию)
+        2. ЦИКЛИЧЕСКОЕ ВЫПОЛНЕНИЕ ОСНОВНОЙ ЛОГИКИ СТАДИИ
+        */
 
         switch (stage)
         {
@@ -104,6 +163,7 @@ int main()
                 measure.TickCounter = 0;
                 LedsOff();
             }
+
             // Начнём первоначальную выставку датчиков
             measure.initial_setting();
             // Отправим сообщение об успешном завершении выставки датчиков
@@ -114,6 +174,7 @@ int main()
             break;
 
         case Measuring:
+            // TODO: переделать выполнение этой стадии в прерывании 
             if (previous_stage != Measuring){
                 previous_stage = Measuring;
 
@@ -122,7 +183,7 @@ int main()
                 TIM_Cmd(TIM4, ENABLE);
             }
             
-            // // Включим зелёные светодиоды для указания корректной работы 
+            // Включим зелёные светодиоды для указания корректной работы 
             LedsOff();
             LedOn(LED6);
             LedOn(LED7);
@@ -264,6 +325,7 @@ void TIM4_IRQHandler(void)
 
 // -------------------------------------------------------------------------------
 // Собственный callback для отработки поступления нового сообщения по com порту
+// TODO: перенести эту логику в класс ComPort
 void UserEP3_OUT_Callback(uint8_t *buffer){
     uint8_t bt;                 // Текущий обрабатываемый байт сообщения
     uint16_t con_sum = 0;       // Посчитанная контрольная сумма

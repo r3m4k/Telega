@@ -19,8 +19,10 @@
 #pragma GCC diagnostic ignored "-Wunused-variable"
 #pragma GCC diagnostic pop
 
-#define FALSE 0
-#define TRUE  1
+#ifndef __cplusplus
+#define false 0
+#define true  1
+#endif
 
 /* Exported functions ------------------------------------------------------- */
 #ifdef __cplusplus
