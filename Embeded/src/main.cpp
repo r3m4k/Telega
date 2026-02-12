@@ -66,35 +66,40 @@ auto stage = ProgramStages::FooStage;
 auto previous_stage = ProgramStages::BeforeBeginning;
 
 // ----------------------------------------------------------------------------
-
-
-
-// ----------------------------------------------------------------------------
-
-using namespace STM_CppLib;
-
-// Периферия
-Leds leds;                          // Светодиоды на плате
-L3GD20 gyro_sensor;                 // Встроенный гироскоп
-LSM303DLHC acc_sensor;              // Встроенный датчик с акселерометром,
-                                    // магнитным и температурным датчиками
-
-// Интерфейсы связи
-ComPort com_port;
-
-// Используемые таймеры
-STM_Timer::Timer3<send_package> timer3;   // Основной таймер, запускающий чтение и отправку данных 
-STM_Timer::Timer4<[](){
-    leds.ChangeLedStatus(LED6);
-    leds.ChangeLedStatus(LED7);
-}> timer4;   // Таймер для мерцания светодиодами LED6, LED7
-
 // Пользовательские экземпляры классов
 Measure measure(55.7522 * PI / 180, TIM_PERIOD * 0.00001);
 
+uint32_t tick_counter = 0;      // Счётчик тиков основного таймера
+
 // ----------------------------------------------------------------------------
 
-uint32_t tick_counter = 0;      // Счётчик тиков основного таймера
+// Периферия
+STM_CppLib::Leds        leds;                   // Светодиоды на плате
+STM_CppLib::L3GD20      sensor_L3GD20;          // Встроенный гироскоп
+STM_CppLib::LSM303DLHC  sensor_LSM303DLHC;      // Встроенный датчик с акселерометром,
+                                                // магнитным и температурным датчиками
+
+// Обработчик поступивших команд
+STM_CppLib::Commands::CommandManager command_manager;
+
+// Интерфейсы связи
+STM_CppLib::ComPort com_port;
+
+// Используемые таймеры
+STM_CppLib::STM_Timer::Timer3<[](){
+    leds.LedOn(LED9);
+    
+    // measure.TickCounter++;
+    // measure.new_tick_Flag = TRUE;
+    
+    leds.LedOff(LED9);
+}> timer3;
+
+STM_CppLib::STM_Timer::Timer4<[](){
+    /* Объявление лямбды, которая будет вызываться в прерывании */
+    leds.ChangeLedStatus(LED6);
+    leds.ChangeLedStatus(LED7);
+}>  timer4;     // Таймер для мерцания светодиодами LED6, LED7
 
 // -------------------------------------------------------------------------------
 
@@ -127,34 +132,38 @@ int main()
     InitAll();             
     
     // Поморгаем светодиодами после успешной инициализации
-    Toggle_Leds();
+    leds.ToggleLeds();
    
     // Основной цикл программы
     while (true)
     {
         // Проверка очереди поступивших команд 
-        if (!(COM_port.command_queue.isEmpty())){
-            COM_port.command_queue.get()();
-            // TODO: создать класс для поступивших команд с методом execute для запуска выполнения команды
+        if (!command_manager.command_queue.is_empty()){
+            auto command = command_manager.command_queue.get();
+            command.execute();
         }
 
-        /*
+        /* ***********************************************************************
         ШАБЛОН ОТРАБОТКИ СТАДИИ ПРОГРАММЫ:
         Каждая стадия (stage) отрабатывается по единому принципу:
         1. ИНИЦИАЛИЗАЦИЯ СТАДИИ (однократное выполнение при входе в стадию)
         2. ЦИКЛИЧЕСКОЕ ВЫПОЛНЕНИЕ ОСНОВНОЙ ЛОГИКИ СТАДИИ
-        */
+        *********************************************************************** */
 
         switch (stage)
         {
         case FooStage:
             if (previous_stage != FooStage){
                 previous_stage = FooStage;
-                TIM_Cmd(TIM4, DISABLE);
-                LedsOn();
+                // TIM_Cmd(TIM4, DISABLE);
+                leds.LedsOn();
             }
 
-            measure.foo_reading_data();
+            // measure.foo_reading_data();
+
+            sensor_L3GD20.ReadData();
+            sensor_LSM303DLHC.ReadData();
+
             break;
 
         case InitialSetting:
@@ -170,6 +179,9 @@ int main()
             COM_port.sending_package(EndOfInitialSetting, MaxCommand_Length);
             
             stage = FooStage;
+
+            constexpr int FilterFrame_num = pow(2, 8);
+            
 
             break;
 
@@ -198,130 +210,29 @@ int main()
 // -------------------------------------------------------------------------------
 // Инициализация оборудования
 void InitAll(){
+    leds.Init();
+    leds.LedsOn();
 
-    // Инициализируем периферию
-    LedsInit();
-    // Init.GPIO();
-    InitResetPin();
+    sensor_L3GD20.Init();
+    sensor_LSM303DLHC.Init();
+    
+    com_port.Init();
 
-    // Инициализируем Virtual Com Port
-    VCP_ResetPort();        // Подтянули ножку d+ к нулю для правильной идентификации
-    VCP_Init();        
+    // Настройка основного таймера
+    uint32_t tim3_period = 2500 - 1;
+    timer3.Init(tim3_period);
 
-    // Инициализируем датчики
-    GYRO_INIT();
-    ACC_INIT();
-    MAG_INIT();
-
-    // Инициализация таймера и его настройка
-    TimerInit();  
+    // Настройка таймера для мерцания светодиодами
+    uint32_t tim4_period = 20000 - 1;
+    timer4.Init(tim4_period);
 }
 
 // -------------------------------------------------------------------------------
-// Настройка светодиодов
-void LedsInit(void)
-{
-    STM_EVAL_LEDInit(LED4);
-    STM_EVAL_LEDInit(LED3);
-    STM_EVAL_LEDInit(LED5);
-    STM_EVAL_LEDInit(LED7);
-    STM_EVAL_LEDInit(LED9);
-    STM_EVAL_LEDInit(LED10);
-    STM_EVAL_LEDInit(LED8);
-    STM_EVAL_LEDInit(LED6);
-}
 
-void Toggle_Leds(void)
-{
-    STM_EVAL_LEDOn(LED3);
-    Delay(100);
-    STM_EVAL_LEDOff(LED3);
-    STM_EVAL_LEDOn(LED4);
-    Delay(100);
-    STM_EVAL_LEDOff(LED4);
-    STM_EVAL_LEDOn(LED6);
-    Delay(100);
-    STM_EVAL_LEDOff(LED6);
-    STM_EVAL_LEDOn(LED8);
-    Delay(100);
-    STM_EVAL_LEDOff(LED8);
-    STM_EVAL_LEDOn(LED10);
-    Delay(100);
-    STM_EVAL_LEDOff(LED10);
-    STM_EVAL_LEDOn(LED9);
-    Delay(100);
-    STM_EVAL_LEDOff(LED9);
-    STM_EVAL_LEDOn(LED7);
-    Delay(100);
-    STM_EVAL_LEDOff(LED7);
-    STM_EVAL_LEDOn(LED5);
-    Delay(100);
-    STM_EVAL_LEDOff(LED5);
-}
+void LedOn(Led_TypeDef Led){   leds.LedOn(Led);   }
 
-void LedsOn(){
-    STM_EVAL_LEDOn(LED3);
-    STM_EVAL_LEDOn(LED4);
-    STM_EVAL_LEDOn(LED5);
-    STM_EVAL_LEDOn(LED6);
-    STM_EVAL_LEDOn(LED7);
-    STM_EVAL_LEDOn(LED8);
-    STM_EVAL_LEDOn(LED9);
-    STM_EVAL_LEDOn(LED10);
-}
+void LedOff(Led_TypeDef Led){  leds.LedOff(Led);  }
 
-void LedsOff(){
-    STM_EVAL_LEDOff(LED3);
-    STM_EVAL_LEDOff(LED4);
-    STM_EVAL_LEDOff(LED5);
-    STM_EVAL_LEDOff(LED6);
-    STM_EVAL_LEDOff(LED7);
-    STM_EVAL_LEDOff(LED8);
-    STM_EVAL_LEDOff(LED9);
-    STM_EVAL_LEDOff(LED10);
-}
-
-void LedOn(Led_TypeDef Led){   STM_EVAL_LEDOn(Led);   }
-
-void LedOff(Led_TypeDef Led){  STM_EVAL_LEDOff(Led);  }
-
-// -------------------------------------------------------------------------------
-// Настройка таймера
-void TimerInit(void){
-
-    NVIC_InitTypeDef NVIC_InitStructure;
-
-    /* Enable TIM clock */
-    RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM4, ENABLE);
-
-    /* Enable the Tim4 Interrupt */
-    NVIC_InitStructure.NVIC_IRQChannel = TIM4_IRQn;
-    NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 0;
-    NVIC_InitStructure.NVIC_IRQChannelSubPriority = 0;
-    NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
-    NVIC_Init(&NVIC_InitStructure);
-
-    TIM_TimeBaseInitTypeDef TIM_TimeBaseStructure;
-    uint16_t TIMER_PRESCALER = TIM_PRESCALER;         
-    /* Set the default configuration */
-    TIM_TimeBaseStructInit(&TIM_TimeBaseStructure);
-    TIM_TimeBaseStructure.TIM_Prescaler = TIMER_PRESCALER - 1;
-    TIM_TimeBaseStructure.TIM_Period = TIM_PERIOD;
-    TIM_TimeBaseInit(TIM4, &TIM_TimeBaseStructure);
-
-    TIM_ITConfig(TIM4, TIM_IT_Update, ENABLE);
-}
-
-void TIM4_IRQHandler(void)
-{ 
-    LedOn(LED9);
-    
-    measure.TickCounter++;
-    measure.new_tick_Flag = TRUE;
-    
-    TIM_ClearITPendingBit(TIM4, TIM_IT_Update);     // Очистим регистр наличия прерывания от датчика
-    LedOff(LED9);
-}
 
 // -------------------------------------------------------------------------------
 // Собственный callback для отработки поступления нового сообщения по com порту
@@ -401,7 +312,7 @@ void stop_CollectingData(){
 }
 
 void error_msg(){
-    COM_port.sending_package(ErrorMessage, MaxCommand_Length);
+    com_port.sending_package(ErrorMessage, MaxCommand_Length);
     Delay(1000);
 }
 // -------------------------------------------------------------------------------

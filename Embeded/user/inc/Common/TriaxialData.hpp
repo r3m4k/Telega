@@ -1,8 +1,9 @@
 /* Define to prevent recursive inclusion -------------------------------------*/
-#ifndef __DATA_FRAME_HPP
-#define __DATA_FRAME_HPP
+#ifndef DATA_FRAME_HPP
+#define DATA_FRAME_HPP
 
 /* Includes ------------------------------------------------------------------*/
+#include <cmath>
 
 /* Defines -------------------------------------------------------------------*/
 
@@ -28,10 +29,11 @@ public:
     // Перегрузка операторов
     // ------------------------------
     
-    void operator=(const TriaxialData& other) {
+    TriaxialData& operator=(const TriaxialData& other) {
         x_coord = other.x_coord;
         y_coord = other.y_coord;
         z_coord = other.z_coord;
+        return *this;
     }
 
     float& operator[](int index){
@@ -106,7 +108,11 @@ public:
         z_coord /= other.z_coord;
         return *this;
     }
+
+    TriaxialData calc_sqrt() const{
+        return TriaxialData(sqrtf(x_coord), sqrtf(y_coord), sqrtf(z_coord));
+    }
 };
 
 
-#endif /*   __DATA_FRAME_HPP   */
+#endif /*   DATA_FRAME_HPP   */

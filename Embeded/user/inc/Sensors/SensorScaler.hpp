@@ -111,7 +111,7 @@ private:
     // Вычисление среднего значения и дисперсии по методу Уэлфорда 
     void append_value(const TriaxialData& val){
         mean_value += (val - mean_value) / (++counter);
-        // variance += (val - mean_value) * (val - mean_value);
+        // variance += (val - mean_value) * (val - mean_value) / counter;
     }
 
     // Вычисление абсолютного значения TriaxialData
