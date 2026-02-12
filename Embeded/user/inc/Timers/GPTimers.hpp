@@ -1,21 +1,18 @@
 /** ***************************************************************************
  * @file    GPTimers.hpp
  * @author  Романовский Роман
- * @brief   Файл для работы с General Purpose Timer.
+ * @brief   Таймеры общего назначения (TIM2, TIM3, TIM4) для STM32F30x
  * 
- * @details
- * Классы для работы с таймерами общего назначения TIM2-TIM4 микроконтроллера.
- * 
- * Архитектура:
- * - GeneralPurposeTimer наследуется от BaseTimer и содержит статическую
- *   переменную PeriphClockCmd для хранения шины тактирования всех дочерних
- *   классов
- * - Timer2, Timer3, Timer4 наследуются от GeneralPurposeTimer и BaseIRQDevice
+ * @details Предоставляет шаблонный класс GPTimer, объединяющий управление
+ *          аппаратным таймером (BaseTimer) и настройку прерываний (BaseIRQDevice)
+ *          с возможностью задания пользовательского обработчика на этапе
+ *          компиляции. Для удобства использования определены псевдонимы
+ *          Timer2, Timer3, Timer4.
  *************************************************************************** */
 
 /* Define to prevent recursive inclusion -------------------------------------*/
-#ifndef __TIMER_HPP
-#define __TIMER_HPP
+#ifndef GP_TIMER_HPP
+#define GP_TIMER_HPP
 
 /* Includes ------------------------------------------------------------------*/
 #include <stdint.h>
@@ -27,9 +24,9 @@
 #include "stm32f30x_tim.h"
 
 #include "Consts.hpp"
-#include "Periphery.hpp"
 #include "BaseTimer.hpp"
 #include "BaseIRQDevice.hpp"
+#include "TimerDescriptor.hpp"
 #include "Leds.hpp"
 
 /* Defines -------------------------------------------------------------------*/
@@ -42,7 +39,18 @@ namespace STM_CppLib{
     namespace STM_Timer{
         
         // ---------------------------------------------------------------------
-        // Шаблонный класс для работы с General Purpose Timer
+        /**
+         * @brief   Шаблонный класс для работы с таймерами общего назначения.
+         * 
+         * @tparam  timer_type   Тип таймера (Timer2, Timer3, Timer4).
+         * @tparam  external_irq_handler   Пользовательский обработчик прерывания.
+         *          Может быть указателем на функцию или лямбда-выражением без захвата.
+         * 
+         * @details Объединяет инициализацию аппаратного таймера (BaseTimer)
+         *          и привязку прерывания через механизм CRTP (BaseIRQDevice).
+         *          Благодаря передаче обработчика через шаблонный параметр,
+         *          вызов выполняется напрямую без виртуальных функций.
+         */
         template<TimerTypes timer_type, auto external_irq_handler>
         class GPTimer: public BaseTimer, public BaseIRQDevice<GPTimer<timer_type, external_irq_handler>, 
                                                                 TimerDescriptor<timer_type>::IRQn>{
@@ -55,25 +63,44 @@ namespace STM_CppLib{
             );
 
         public:
+            /**
+             * @brief   Конструктор объекта GPTimer.
+             * 
+             * @details Инициализирует указатель на собственный экземпляр как
+             *          обработчик прерывания (irq_device_ptr) и сохраняет
+             *          указатель на регистровую структуру таймера TIMx,
+             *          полученный через TimerDescriptor.
+             */
             GPTimer(){
                 this->irq_device_ptr = this;
                 this->TIMx = TimerDescriptor<timer_type>::get_TIMx();
             }
 
+            /**
+             * @brief   Инициализация таймера и настройка его прерывания.
+             * 
+             * @param   tim_period   Период счёта таймера.
+             * @param   prescaller   Делитель тактовой частоты таймера.
+             * @param   timer_config_ptr   Указатель на пользовательскую конфигурацию таймера.
+             *                      Если передан nullptr, используется конфигурация по умолчанию
+             *                      с заданными периодом и предделителем.
+             * @param   NVIC_IRQChannelPreemptionPriority   Приоритет вытеснения для прерывания таймера.
+             * @param   NVIC_IRQChannelSubPriority          Подприоритет прерывания.
+             * 
+             * @details Метод предоставляет два способа инициализации:
+             *          - Через готовую структуру TimerConfig (если указатель не nullptr).
+             *          - Автоматически: используется RCC_APB1PeriphClockCmd,
+             *            RCC_Periph из TimerDescriptor, заданные prescaller и tim_period.
+             *          После инициализации таймера настраивается прерывание
+             *          с указанными приоритетами.
+             */
             void Init(
-                uint32_t tim_period = 1000,                             // Количество тиков таймера для генерации прерывания
-                uint16_t prescaller = Prescaller_10kHz,                 // Делитель частоты шины 
-                TimerConfig* timer_config_ptr = nullptr,                // Указатель на конфигурацию таймера 
-                uint8_t NVIC_IRQChannelPreemptionPriority = DefaultIRQChannelPreemptionPriority,    // Приоритет прерывания
-                uint8_t NVIC_IRQChannelSubPriority = DefaultIRQChannelSubPriority                   // Подприоритет прерывания
+                uint32_t tim_period = 1000,
+                uint16_t prescaller = Prescaler_10kHz,
+                TimerConfig* timer_config_ptr = nullptr,
+                uint8_t NVIC_IRQChannelPreemptionPriority = DefaultIRQChannelPreemptionPriority,
+                uint8_t NVIC_IRQChannelSubPriority = DefaultIRQChannelSubPriority
             ){
-                /* *************************************************************************
-                *  Данный метод позволяет гибко настроить таймер для работы и отработки прерываний.
-                *  Если timer_config_ptr == nullptr, то таймер инициализируется с прописанными в коде параметрами,
-                *  чтобы их изменить необходимо самостоятельно заполнить конфигурацию таймера и передать в функцию
-                *  в качестве параметра. Аналогично реализована инициализация прерывания.
-                ** ********************************************************************** */
-
                 if (!timer_config_ptr){
                     TimerConfig timer_config = {
                         .PeriphClockCmd = RCC_APB1PeriphClockCmd,
@@ -86,9 +113,7 @@ namespace STM_CppLib{
                 }
                 else{   this->InitBaseTimer(timer_config_ptr);   }
                 
-                // Настройка прерывания
                 NVIC_InitTypeDef NVIC_InitStructure;
-                
                 NVIC_InitStructure.NVIC_IRQChannel = TimerDescriptor<timer_type>::IRQn;
                 NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = NVIC_IRQChannelPreemptionPriority;
                 NVIC_InitStructure.NVIC_IRQChannelSubPriority = NVIC_IRQChannelSubPriority;
@@ -97,25 +122,41 @@ namespace STM_CppLib{
                 this->InitInterrupt(&NVIC_InitStructure);
             }
 
+            /**
+             * @brief   Обработчик прерывания таймера.
+             * 
+             * @details Вызывает пользовательский обработчик, переданный через
+             *          шаблонный параметр external_irq_handler, после чего
+             *          сбрасывает флаг прерывания по событию обновления (TIM_IT_Update).
+             *          Очистка флага обязательна для повторного возникновения прерывания.
+             */
             void irq_handler(){
-                // Вызов внешнего обработчика прерывания
                 external_irq_handler();
-
-                // Очистим регистр наличия прерывания от датчика
-                TIM_ClearITPendingBit(TIMx, TIM_IT_Update);     
+                TIM_ClearITPendingBit(TIMx, TIM_IT_Update);
             }
 
         };
 
         // ---------------------------------------------------------------------
 
-        // Псевдонимы таймеров для удобства использования 
+        /**
+         * @brief   Псевдоним GPTimer для таймера TIM2.
+         * @tparam  external_irq_handler   Пользовательский обработчик прерывания.
+         */
         template<auto external_irq_handler>
         using Timer2 = GPTimer<TimerTypes::Timer2, external_irq_handler>;
 
+        /**
+         * @brief   Псевдоним GPTimer для таймера TIM3.
+         * @tparam  external_irq_handler   Пользовательский обработчик прерывания.
+         */
         template<auto external_irq_handler>
         using Timer3 = GPTimer<TimerTypes::Timer3, external_irq_handler>;
 
+        /**
+         * @brief   Псевдоним GPTimer для таймера TIM4.
+         * @tparam  external_irq_handler   Пользовательский обработчик прерывания.
+         */
         template<auto external_irq_handler>
         using Timer4 = GPTimer<TimerTypes::Timer4, external_irq_handler>;
 
@@ -125,4 +166,4 @@ namespace STM_CppLib{
 } // namespace STM_CppLib
 
 
-#endif /*   __TIMER_HPP   */
+#endif /*   GP_TIMER_HPP   */

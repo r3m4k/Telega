@@ -1,5 +1,7 @@
 /* Includes H files ----------------------------------------------------------*/
 #include "main.h"
+#include "Drv_Gpio.h"
+#include "Drv_Uart.h"
 
 /* Includes HPP files --------------------------------------------------------*/
 #include "Consts.hpp"
@@ -10,6 +12,7 @@
 #include "GyronavtPackage.hpp"
 #include "ComPort.hpp"
 #include "USART.hpp"
+#include "CommandProcessing.hpp"
 #include "GpioPort.hpp"
 #include "GpioPin.hpp"
 
@@ -37,63 +40,69 @@ __IO uint32_t UserButtonPressed = 0;
 __IO uint8_t PrevXferComplete = 1;
 __IO uint8_t buttonState;
 // ===============================================================================
-
-
-/* Defines ------------------------------------------------------------------*/
-#define IST_VECTORS_NUM     98
-
-/* Typedef ------------------------------------------------------------------*/
-typedef void (* const pHandler)(void);
-
-/* Global variables ---------------------------------------------------------*/
-
-extern pHandler __isr_vectors[];
-
-// Собственная таблица прерываний
-__attribute__((aligned(128)))    // Cortex-M4 требует выравнивание по 128 байт!
-__user_pHandler __user_vector_table[IST_VECTORS_NUM] = {0};
+// Необходимые дефайны
+#define PI 3.14159265358979f
+#define TIM_PRESCALER      720          // При таком предделителе таймера получается один тик таймера на 10 мкс
+#define TIM_PERIOD         25000        // Количество тиков таймера с частотой 10 кГц перед вызовом прерывания --> 250 мс период
 
 // ----------------------------------------------------------------------------
+// Сообщения, которые будем отправлять в ответ по COM порту (определены в COM_Port.hpp)
+extern uint8_t ErrorMessage[MaxCommand_Length];
+extern uint8_t ConfirmMessage[MaxCommand_Length];
+extern uint8_t EndOfInitialSetting[MaxCommand_Length];
 
-// Стадии программы
-enum class ProgramStages{InfiniteSending};
+// -------------------------------------------------------------------------------
 
-// ----------------------------------------------------------------------------
+// Перечисление для стадии выполнения программы
+enum class ProgramStages{
+    BeforeBeginning,    // Фиктивная стадия программы (необходима для индикации первой смены стадии программы)
+    FooStage,           // Данные с датчиков считываются, но не фильтруются и не отправляются
+    InitialSetting,     // Сбор и отправка данных для выставки 
+    Measuring           // Сбор и отправка данных с частотой 4 Гц
+};
 
-using namespace STM_CppLib;
-
-// Периферия
-Leds leds;                          // Светодиоды на плате
-L3GD20 gyro_sensor;                 // Встроенный гироскоп
-LSM303DLHC acc_sensor;              // Встроенный датчик с акселерометром,
-                                    // магнитным и температурным датчиками
-STM_Packages::GyronavtPackage gyronavt_package;   // Пакет данных в формате "Гиронавт"
-
-// Интерфейсы связи
-ComPort com_port;
-USARTx usart1;
-
-// Используемые таймеры
-STM_Timer::Timer3<send_package> timer3;   // Основной таймер, запускающий чтение и отправку данных 
-STM_Timer::Timer4<[](){
-    leds.ChangeLedStatus(LED6);
-    leds.ChangeLedStatus(LED7);
-}> timer4;   // Таймер для мерцания светодиодами LED6, LED7
-
-// Пин Pin_PC0 используется для инициализации прерывания EXTI_Line1, настроенное
-// на перевод пина Pin_PC1 из состояние Reset в состояние Set.
-// ВАЖНО! Данные пины должны быть соединены перемычкой на плате. 
-STM_GPIO::GPIO_Pin <STM_GPIO::GPIO_Port::PortC, GPIO_PinSource0> Pin_PC0;
-
-// Настройка внешнего прерывания, которое будет вызываться из main
-STM_GPIO::GPIO_Pin_EXTI
-    <STM_GPIO::GPIO_Port::PortC, GPIO_PinSource1, update_package_data> Pin_PC1;
+// Тк будем менять стадии программы из других файлов, то разместим стадии в глобальной зоне видимости
+auto stage = ProgramStages::FooStage;
+auto previous_stage = ProgramStages::BeforeBeginning;
 
 // ----------------------------------------------------------------------------
+// Пользовательские экземпляры классов
+Measure measure(55.7522 * PI / 180, TIM_PERIOD * 0.00001);
 
 uint32_t tick_counter = 0;      // Счётчик тиков основного таймера
 
 // ----------------------------------------------------------------------------
+
+// Периферия
+STM_CppLib::Leds        leds;                   // Светодиоды на плате
+STM_CppLib::L3GD20      sensor_L3GD20;          // Встроенный гироскоп
+STM_CppLib::LSM303DLHC  sensor_LSM303DLHC;      // Встроенный датчик с акселерометром,
+                                                // магнитным и температурным датчиками
+
+// Обработчик поступивших команд
+STM_CppLib::Commands::CommandManager command_manager;
+
+// Интерфейсы связи
+STM_CppLib::ComPort com_port;
+
+// Используемые таймеры
+STM_CppLib::STM_Timer::Timer3<[](){
+    leds.LedOn(LED9);
+    
+    // measure.TickCounter++;
+    // measure.new_tick_Flag = TRUE;
+    
+    leds.LedOff(LED9);
+}> timer3;
+
+STM_CppLib::STM_Timer::Timer4<[](){
+    /* Объявление лямбды, которая будет вызываться в прерывании */
+    leds.ChangeLedStatus(LED6);
+    leds.ChangeLedStatus(LED7);
+}>  timer4;     // Таймер для мерцания светодиодами LED6, LED7
+
+
+// -------------------------------------------------------------------------------
 
 
 int main()
@@ -121,49 +130,81 @@ int main()
     
     // ##########################
 
-    auto stage = ProgramStages::InfiniteSending;    // Стадия программы
-
     // Инициализируем всё оборудования
     InitAll();             
     
     // Поморгаем светодиодами после успешной инициализации
     leds.ToggleLeds();
-
-    // Считаем показания датчиков до запуска таймеров, чтобы не отправлять нулевые данные
-    gyro_sensor.ReadData();
-    acc_sensor.ReadData();
-    update_package_data();
-    
-    // Запустим таймеры
-    timer3.Start();
-    timer4.Start();
-
+   
     // Основной цикл программы
     while (true)
     {
-        switch (stage){
-        case ProgramStages::InfiniteSending:
+        // Проверка очереди поступивших команд 
+        if (!command_manager.command_queue.is_empty()){
+            auto command = command_manager.command_queue.get();
+            command.execute();
+        }
 
-            leds.LedOn(LED9);
+        /* ***********************************************************************
+        ШАБЛОН ОТРАБОТКИ СТАДИИ ПРОГРАММЫ:
+        Каждая стадия (stage) отрабатывается по единому принципу:
+        1. ИНИЦИАЛИЗАЦИЯ СТАДИИ (однократное выполнение при входе в стадию)
+        2. ЦИКЛИЧЕСКОЕ ВЫПОЛНЕНИЕ ОСНОВНОЙ ЛОГИКИ СТАДИИ
+        *********************************************************************** */
 
-            // Считаем показания датчиков
-            gyro_sensor.ReadData();
-            acc_sensor.ReadData();
+        switch (stage)
+        {
+        case FooStage:
+            if (previous_stage != FooStage){
+                previous_stage = FooStage;
+                timer4.Stop();
+                timer4.ResetCounter();
+                leds.LedsOn();
+            }
+
+            // Периодическое чтение данных для поддержания температуры кристалла датчиков
+            // Возможно, это излишне
+            sensor_L3GD20.ReadData();
+            sensor_LSM303DLHC.ReadData();
+
+            break;
+
+        case InitialSetting:
+            if (previous_stage != InitialSetting){
+                previous_stage = InitialSetting;
+                measure.TickCounter = 0;
+                LedsOff();
+            }
+
+            // Начнём первоначальную выставку датчиков
+            measure.initial_setting();
+            // Отправим сообщение об успешном завершении выставки датчиков
+            COM_port.sending_package(EndOfInitialSetting, MaxCommand_Length);
             
-            // Обновим данные gyronavt_package в прерывании EXTI_Line1 
+            stage = FooStage;
 
-            /* Программная инициализация прерывания */
-            EXTI_GenerateSWInterrupt(EXTI_Line1);
-
-            /* ***************************
-            Инициализация прерывания через поднятие ножки PC0.
-            Для этого необходимо соединить ножки PC0 и PC1 с помощью джампера!
-            *************************** */
-            // Pin_PC0.SetPin();
-            // Pin_PC0.ResetPin();
+            constexpr int FilterFrame_num = pow(2, 8);
             
-            leds.LedOff(LED9);
 
+            break;
+
+        case Measuring:
+            // TODO: переделать выполнение этой стадии в прерывании 
+            if (previous_stage != Measuring){
+                previous_stage = Measuring;
+
+                measure.TickCounter = 0;
+                // Запускаем таймер 
+                TIM_Cmd(TIM4, ENABLE);
+            }
+            
+            // Включим зелёные светодиоды для указания корректной работы 
+            LedsOff();
+            LedOn(LED6);
+            LedOn(LED7);
+                       
+            // Начнём работу
+            measure.measuring();  
             break;
         }
     }
@@ -173,71 +214,110 @@ int main()
 // Инициализация оборудования
 void InitAll(){
     leds.Init();
-    gyro_sensor.Init();
-    acc_sensor.Init();
-    com_port.Init();
-    usart1.Init();
-    Pin_PC0.InitPin();
-    Pin_PC1.InitPinExti();
+    leds.LedsOn();
 
-    // Настройка таймера для начала сбора данных
-    uint32_t tim3_period = 25 - 1;      // те на 25 тик таймер переполнится и вызовется прерывание
+    sensor_L3GD20.Init();
+    sensor_LSM303DLHC.Init();
+    
+    com_port.Init();
+
+    // Настройка основного таймера
+    uint32_t tim3_period = 2500 - 1;
     timer3.Init(tim3_period);
 
     // Настройка таймера для мерцания светодиодами
-    uint32_t tim4_period = 20000 - 1;   // срабатывание каждые 2 с
+    uint32_t tim4_period = 20000 - 1;
     timer4.Init(tim4_period);
 }
 
 // -------------------------------------------------------------------------------
 
-// Функция для обновления данных в посылке gyronavt_package
-void update_package_data(){
-    gyronavt_package.UpdateData();
-}
+void LedOn(Led_TypeDef Led){   leds.LedOn(Led);   }
+
+void LedOff(Led_TypeDef Led){  leds.LedOff(Led);  }
+
 
 // -------------------------------------------------------------------------------
+// Собственный callback для отработки поступления нового сообщения по com порту
+// TODO: перенести эту логику в класс ComPort
+void UserEP3_OUT_Callback(uint8_t *buffer){
+    uint8_t bt;                 // Текущий обрабатываемый байт сообщения
+    uint16_t con_sum = 0;       // Посчитанная контрольная сумма
+    uint8_t len;                // Длина данных в сообщении
+    uint8_t dataIndex = 0;      // Текущий индекс информации в сообщении 
 
-// Функция для отправки посылки gyronavt_package по COM порту
-void send_package(){
-    // Изменим состояние светодиода при отправке сообщения
-    leds.ChangeLedStatus(LED8);
+    for(uint8_t i = 0; i < 64; i++){        // hw_config.c --> len(buffer) = 64
+        bt = buffer[i];
+        switch (decode_stage)
+        {
+        case Want7E:
+            if (bt == 0x7e){
+                decode_stage = WantE7;
+                con_sum += bt;
+            } else    decode_stage = Want7E;
+            break;
+        case WantE7:
+            if (bt == 0xe7){
+                decode_stage = WantFormat;
+                con_sum += bt;
+            } else    decode_stage = Want7E;
+            break;
+        case WantFormat:
+            if (bt == 0xff){
+                decode_stage = WantData;
+                con_sum += bt;
+                len = 2;        // Количество байт данных в сообщении с форматом 0xff
+            } else    decode_stage = Want7E;
+            break;
+        case WantData:
+            if (dataIndex < len){
+                con_sum += bt;
+                dataIndex++;
+            }
 
-    // Обновим счётчик таймера и контрольную сумму перед отправкой
-    gyronavt_package.UpdateTime(++tick_counter);
-    gyronavt_package.UpdateControlSum();
-
-    // Отправим посылку по com порту и usart1
-    leds.LedOn(LED4);
-    com_port.SendPackage(gyronavt_package);
-    leds.LedOff(LED4);
-
-    leds.LedOn(LED5);
-    usart1.SendPackage(gyronavt_package);
-    leds.LedOff(LED5);
-}
-
-// -------------------------------------------------------------------------------
-
-void UserEP3_OUT_Callback(uint8_t *buffer)
-{
-    buffer[0] = 0;
-}
-
-// -------------------------------------------------------------------------------
-
-void USART1_IRQHandler(void)
-{
-    if (USART_GetITStatus(USART1, USART_IT_RXNE) != RESET) // было прерывание от приемника
-        __NOP();
-
-    if (USART_GetITStatus(USART1, USART_IT_TXE) != RESET){ // было прерывание от передатчика
-        while (USART_GetFlagStatus(USART1, USART_FLAG_TC) == RESET){} // дожидаюсь завершения выдачи текущего байта и отключаю прерывания от выдачи
-        USART_ITConfig(USART1, USART_IT_TXE, DISABLE);
+            if (dataIndex == len){
+                decode_stage = WantConSum; 
+            }
+            break;
+        
+        case WantConSum:
+            decode_stage = Want7E;
+            if (uint8_t(con_sum) == bt){
+                COM_port.sending_package(ConfirmMessage, MaxCommand_Length);
+                COM_port.new_message(buffer);
+                return;
+            }
+            break;
+        }
     }
-    USART_ClearITPendingBit(USART1, USART_IT_ORE);
 }
 
+// Функции для обработки поступивших команд
+void restart(){
+    NVIC_SystemReset();
+}
+
+void start_InitialSetting(){
+    stage = InitialSetting;
+}
+
+void start_Measuring(){
+    stage = Measuring;
+}
+
+void stop_Measuring(){
+    stage = FooStage;
+}
+
+void stop_CollectingData(){
+    stage = FooStage;
+    measure.TickCounter = 0;
+}
+
+void error_msg(){
+    com_port.sending_package(ErrorMessage, MaxCommand_Length);
+    Delay(1000);
+}
 // -------------------------------------------------------------------------------
 
 void Error_Handler(void)
@@ -257,6 +337,7 @@ void Delay(__IO uint32_t nTime)
     TimingDelay = nTime;
 
     while (TimingDelay != 0){}
+    // for (int i = 0; i < 1000000; i++){}
 }
 
 // Function to Decrement the TimingDelay variable.

@@ -1,11 +1,19 @@
+/** ***************************************************************************
+ * @file    BaseTimer.hpp
+ * @author  Романовский Роман
+ * @brief   Базовые классы для работы с таймерами STM32F30x
+ * @details Содержит:
+ *          - предопределённые значения предделителей для частот 1, 10, 100 кГц;
+ *          - базовый класс BaseTimer для аппаратного управления таймером;
+ *************************************************************************** */
+
 /* Define to prevent recursive inclusion -------------------------------------*/
-#ifndef __BASE_TIMER_HPP
-#define __BASE_TIMER_HPP
+#ifndef BASE_TIMER_HPP
+#define BASE_TIMER_HPP
 
 /* Includes ------------------------------------------------------------------*/
 #include <stdint.h>
 
-#include "main.h"
 #include "stm32f30x.h"
 #include "stm32f30x_rcc.h"
 #include "stm32f30x_misc.h"
@@ -15,9 +23,23 @@
 #include "TimerConfig.hpp"
 
 /* Defines -------------------------------------------------------------------*/
-#define     Prescaller_1kHz         72000
-#define     Prescaller_10kHz        7200
-#define     Prescaller_100kHz       720
+/**
+ * @def     Prescaler_1kHz
+ * @brief   Предделитель для получения частоты счёта 1 кГц
+ */
+#define     Prescaler_1kHz         72000
+
+/**
+ * @def     Prescaler_10kHz
+ * @brief   Предделитель для частоты счёта 10 кГц
+ */
+#define     Prescaler_10kHz        7200
+
+/**
+ * @def     Prescaler_100kHz
+ * @brief   Предделитель для частоты счёта 100 кГц
+ */
+#define     Prescaler_100kHz       720
 
 /* Global variables ----------------------------------------------------------*/
 
@@ -27,76 +49,91 @@ namespace STM_CppLib{
     namespace STM_Timer{
     
     // -------------------------------------------------------------------------
-    // Базовый таймер
+    /**
+     * @brief   Базовый класс для аппаратного управления таймером.
+     * @details Инкапсулирует указатель на структуру TIM_TypeDef и предоставляет
+     *          методы инициализации, пуска, останова и сброса счётчика.
+     *          Не предназначен для прямого использования – служит основой
+     *          для классов-наследников.
+     */
     class BaseTimer{
     protected:
-        TIM_TypeDef* TIMx;      // Структура инициализации таймера. Она используется почти во всех
-                                // функциях таймеров, так что сохраним ей, как поле базового таймера
-        
-    public:
+        /**
+         * @brief   Указатель на регистровую структуру таймера
+         */
+        TIM_TypeDef* TIMx;
 
-        BaseTimer(){}
+    public:
+        /**
+         * @brief   Конструктор по умолчанию.
+         * @details Инициализирует TIMx = nullptr.
+         */
+        BaseTimer(): TIMx(nullptr) {}
+
+        /**
+         * @brief   Деструктор.
+         * @details Отключает прерывание по обновлению и выключает таймер.
+         */
         ~BaseTimer(){
-            TIM_ITConfig(TIMx, TIM_IT_Update, DISABLE);
-            TIM_Cmd(TIMx, DISABLE);
+            if (TIMx) {
+                TIM_ITConfig(TIMx, TIM_IT_Update, DISABLE);
+                TIM_Cmd(TIMx, DISABLE);
+            }
         };
 
+        /**
+         * @brief   Инициализация базовых параметров таймера.
+         * @param   timer_config   Указатель на структуру TimerConfig, содержащую:
+         *                         - функцию включения тактирования (PeriphClockCmd);
+         *                         - константу RCC (RCC_PeriphClock);
+         *                         - значение предделителя (TimPrescaler);
+         *                         - период счёта (TimPeriod).
+         * @details Включает тактирование таймера, инициализирует регистры
+         *          предделителя и автоперезагрузки через TIM_TimeBaseInit.
+         */
         void InitBaseTimer(TimerConfig* timer_config){
-            /* Init structures */
             TIM_TimeBaseInitTypeDef TIM_TimeBaseStructure;
 
-            /* Enable TIM clock */
             timer_config->PeriphClockCmd(timer_config->RCC_PeriphClock, ENABLE);
 
-            /* Set the timer configuration */
             TIM_TimeBaseStructInit(&TIM_TimeBaseStructure);
             TIM_TimeBaseStructure.TIM_Period = timer_config->TimPeriod;
             TIM_TimeBaseStructure.TIM_Prescaler = timer_config->TimPrescaler;
             TIM_TimeBaseInit(TIMx, &TIM_TimeBaseStructure);
-
         }
         
+        /**
+         * @brief   Запуск таймера.
+         * @details Разрешает прерывание по событию обновления (Update) и
+         *          включает счёт таймера (TIM_Cmd(ENABLE)).
+         */
         void Start() {
+            if (!TIMx) return;
             TIM_ITConfig(TIMx, TIM_IT_Update, ENABLE);
             TIM_Cmd(TIMx, ENABLE);
         }
+
+        /**
+         * @brief   Останов таймера.
+         * @details Запрещает прерывание по событию обновления и выключает счёт таймера.
+         */
+        void Stop() {
+            if (!TIMx) return;
+            TIM_ITConfig(TIMx, TIM_IT_Update, DISABLE);
+            TIM_Cmd(TIMx, DISABLE);
+        }
+
+        /**
+         * @brief   Сброс счётчика таймера.
+         * @details Устанавливает регистр CNT в 0.
+         */
+        void ResetCounter() {
+            if (TIMx) TIMx->CNT = 0;
+        }
     };
 
-    // -------------------------------------------------------------------------
-
-    enum class TimerTypes {Timer1, Timer2, Timer3, Timer4};
-
-    template<TimerTypes timer_type>
-    class TimerDescriptor{
-    public:
-        static constexpr TIM_TypeDef* get_TIMx(){
-            switch (timer_type){
-                case TimerTypes::Timer2: return TIM2;
-                case TimerTypes::Timer3: return TIM3;
-                case TimerTypes::Timer4: return TIM4;
-                default: return nullptr;
-            }
-        };
-
-        static constexpr IRQn_Type IRQn = []() -> IRQn_Type {
-            switch (timer_type){
-                case TimerTypes::Timer2: return TIM2_IRQn;
-                case TimerTypes::Timer3: return TIM3_IRQn;
-                case TimerTypes::Timer4: return TIM4_IRQn;
-            }
-        }();
-
-        static constexpr uint32_t RCC_Periph = []() -> uint32_t {
-            switch (timer_type){
-                case TimerTypes::Timer2: return RCC_APB1Periph_TIM2;
-                case TimerTypes::Timer3: return RCC_APB1Periph_TIM3;
-                case TimerTypes::Timer4: return RCC_APB1Periph_TIM4;
-            }
-        }();
-    };
-
-    }
-}
+    } // namespace STM_Timer
+} // namespace STM_CppLib
 
 
-#endif /*   __BASE_TIMER_HPP   */
+#endif /*   BASE_TIMER_HPP   */
