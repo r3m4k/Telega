@@ -6,6 +6,7 @@
 #include "VCP_F3.h"
 #include "hw_config.h"
 #include "BasePackage.hpp"
+#include "Message.hpp"
 
 /* Defines -------------------------------------------------------------------*/
 
@@ -28,6 +29,11 @@ namespace STM_CppLib{
         // Отправка по COM порту пакета данных
         void SendPackage(STM_Packages::BasePackage& package){
             CDC_Send_DATA(package.data_ptr, package.len);
+        }
+
+        // Отправка сообщения по com порту
+        void SendMessage(Message& message){
+            CDC_Send_DATA(message.bytes_msg, MessageLength);
         }
     };
 

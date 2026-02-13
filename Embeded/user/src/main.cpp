@@ -1,7 +1,5 @@
 /* Includes H files ----------------------------------------------------------*/
 #include "main.h"
-#include "Drv_Gpio.h"
-#include "Drv_Uart.h"
 
 /* Includes HPP files --------------------------------------------------------*/
 #include "Consts.hpp"
@@ -9,12 +7,11 @@
 #include "Leds.hpp"
 #include "L3GD20.hpp"
 #include "LSM303DLHC.hpp"
-#include "GyronavtPackage.hpp"
+#include "TelegaPackage.hpp"
 #include "ComPort.hpp"
-#include "USART.hpp"
+#include "Message.hpp"
 #include "CommandProcessing.hpp"
-#include "GpioPort.hpp"
-#include "GpioPin.hpp"
+#include "NSigmaFilter.hpp"
 
 // ----------------------------------------------------------------------------
 //
@@ -40,16 +37,20 @@ __IO uint32_t UserButtonPressed = 0;
 __IO uint8_t PrevXferComplete = 1;
 __IO uint8_t buttonState;
 // ===============================================================================
-// Необходимые дефайны
-#define PI 3.14159265358979f
-#define TIM_PRESCALER      720          // При таком предделителе таймера получается один тик таймера на 10 мкс
-#define TIM_PERIOD         25000        // Количество тиков таймера с частотой 10 кГц перед вызовом прерывания --> 250 мс период
 
 // ----------------------------------------------------------------------------
 // Сообщения, которые будем отправлять в ответ по COM порту (определены в COM_Port.hpp)
 extern uint8_t ErrorMessage[MaxCommand_Length];
 extern uint8_t ConfirmMessage[MaxCommand_Length];
 extern uint8_t EndOfInitialSetting[MaxCommand_Length];
+
+/* Global variables ---------------------------------------------------------*/
+
+extern pHandler __isr_vectors[];
+
+// Собственная таблица прерываний
+__attribute__((aligned(128)))    // Cortex-M4 требует выравнивание по 128 байт!
+__user_pHandler __user_vector_table[IST_VECTORS_NUM] = {0};
 
 // -------------------------------------------------------------------------------
 
@@ -67,9 +68,10 @@ auto previous_stage = ProgramStages::BeforeBeginning;
 
 // ----------------------------------------------------------------------------
 // Пользовательские экземпляры классов
-Measure measure(55.7522 * PI / 180, TIM_PERIOD * 0.00001);
+// Measure measure(55.7522 * PI / 180, TIM_PERIOD * 0.00001);
 
 uint32_t tick_counter = 0;      // Счётчик тиков основного таймера
+volatile bool timer_tick_flag = false;
 
 // ----------------------------------------------------------------------------
 
@@ -87,13 +89,10 @@ STM_CppLib::ComPort com_port;
 
 // Используемые таймеры
 STM_CppLib::STM_Timer::Timer3<[](){
-    leds.LedOn(LED9);
-    
-    // measure.TickCounter++;
-    // measure.new_tick_Flag = TRUE;
-    
-    leds.LedOff(LED9);
-}> timer3;
+    /* Объявление лямбды, которая будет вызываться в прерывании */
+    leds.ChangeLedStatus(LED9);
+    timer_tick_flag = true;    
+}>  timer3;
 
 STM_CppLib::STM_Timer::Timer4<[](){
     /* Объявление лямбды, которая будет вызываться в прерывании */
@@ -135,6 +134,19 @@ int main()
     
     // Поморгаем светодиодами после успешной инициализации
     leds.ToggleLeds();
+
+    // Используемые фильтры
+    NSigmaFilter<2.0f, 4, 16> filter_acc;
+    NSigmaFilter<2.0f, 4, 16> filter_gyro;
+
+    // Значения ускорений и угловой скорости для отправки
+    TriaxialData acc_value;
+    TriaxialData gyro_value;
+
+    // Посылка данных
+    STM_CppLib::STM_Packages::TelegaPackage telega_package(
+        &acc_value, &gyro_value, &acc_value
+    );
    
     // Основной цикл программы
     while (true)
@@ -154,7 +166,7 @@ int main()
 
         switch (stage)
         {
-        case FooStage:
+        case ProgramStages::FooStage:
             if (previous_stage != FooStage){
                 previous_stage = FooStage;
                 timer4.Stop();
@@ -169,42 +181,103 @@ int main()
 
             break;
 
-        case InitialSetting:
+        case ProgramStages::InitialSetting:
             if (previous_stage != InitialSetting){
                 previous_stage = InitialSetting;
-                measure.TickCounter = 0;
-                LedsOff();
+                tick_counter = 0;
+                leds.LedsOff();
+                timer4.ResetCounter();
+                timer4.Start();
             }
 
-            // Начнём первоначальную выставку датчиков
-            measure.initial_setting();
-            // Отправим сообщение об успешном завершении выставки датчиков
-            COM_port.sending_package(EndOfInitialSetting, MaxCommand_Length);
-            
-            stage = FooStage;
+            // Количество пакетов для выставки датчиков
+            constexpr int FilterFrame_num = 256;
 
-            constexpr int FilterFrame_num = pow(2, 8);
-            
+            // Сбросим фильтры перед сбором данных
+            filter_acc.reset();
+            filter_gyro.reset();
 
+            for(int i = 0; i < FilterFrame_num; i++){
+                while(!filter_acc.is_data_filtered() || !filter_gyro.is_data_filtered()){
+                    // Считаем значения
+                    sensor_L3GD20.ReadData();
+                    sensor_LSM303DLHC.ReadData();
+    
+                    // Добавим полученные значения в фильтры
+                    filter_acc.append_value(sensor_LSM303DLHC.acc_data);
+                    filter_gyro.append_value(sensor_L3GD20.gyro_data);
+                }
+
+                // Обновим значения acc_value и gyro_value
+                acc_value = filter_acc.get_filtered_data();
+                gyro_value = filter_gyro.get_filtered_data();
+
+                // Обновим данные в посылке и отправим её по com-порту
+                // TODO: в дальнейшем, тут надо обновить и другие поля посылки
+                telega_package.UpdateData();
+                com_port.SendPackage(telega_package);
+
+                // Сбросим фильтры
+                filter_acc.reset();
+                filter_gyro.reset();
+            }
+
+            // В конце отправим сообщение об окончании выставки
+            com_port.SendMessage(Message(EndOfInitialSetting, MaxCommand_Length));
+
+            stage = ProgramStages::FooStage;
             break;
 
-        case Measuring:
-            // TODO: переделать выполнение этой стадии в прерывании 
+        case ProgramStages::Measuring:
             if (previous_stage != Measuring){
                 previous_stage = Measuring;
-
-                measure.TickCounter = 0;
-                // Запускаем таймер 
-                TIM_Cmd(TIM4, ENABLE);
+                tick_counter = 0;
+                leds.LedsOff();
+                // Запустим таймер сбора данных с частотой 4 Гц
+                timer3.ResetCounter();
+                timer3.Start();
+                // Запустим таймер индикации работы
+                timer4.ResetCounter();
+                timer4.Start();
             }
-            
-            // Включим зелёные светодиоды для указания корректной работы 
-            LedsOff();
-            LedOn(LED6);
-            LedOn(LED7);
-                       
-            // Начнём работу
-            measure.measuring();  
+
+            if (timer_tick_flag){
+
+                /* ***********************************************************************
+                * ВАЖНО! Длительность выполнения этой стадии не должна превышать 200мс
+                * для обеспечения выдачи данных с частотой 4 Гц. Длительность выполнения
+                * можно менять с помощью шаблонных параметров NSigmaFilter.
+                *********************************************************************** */
+
+                leds.LedOn(LED5);
+
+                while(!filter_acc.is_data_filtered() || !filter_gyro.is_data_filtered()){
+                    // Считаем значения
+                    sensor_L3GD20.ReadData();
+                    sensor_LSM303DLHC.ReadData();
+    
+                    // Добавим полученные значения в фильтры
+                    filter_acc.append_value(sensor_LSM303DLHC.acc_data);
+                    filter_gyro.append_value(sensor_L3GD20.gyro_data);
+                }
+
+                // Обновим значения acc_value и gyro_value
+                acc_value = filter_acc.get_filtered_data();
+                gyro_value = filter_gyro.get_filtered_data();
+
+                // Обновим данные в посылке и отправим её по com-порту
+                // TODO: в дальнейшем, тут надо обновить и другие поля посылки
+                telega_package.UpdateData();
+                com_port.SendPackage(telega_package);
+
+                // Сбросим фильтры
+                filter_acc.reset();
+                filter_gyro.reset();
+
+                leds.LedOff(LED5);
+                timer_tick_flag = false;
+            }
+
             break;
         }
     }
@@ -221,11 +294,11 @@ void InitAll(){
     
     com_port.Init();
 
-    // Настройка основного таймера
+    // Настройка основного таймера с периодом счёта в 250 мс (4 Гц)
     uint32_t tim3_period = 2500 - 1;
     timer3.Init(tim3_period);
 
-    // Настройка таймера для мерцания светодиодами
+    // Настройка таймера для мерцания светодиодами с периодом счёта в 2 с
     uint32_t tim4_period = 20000 - 1;
     timer4.Init(tim4_period);
 }
@@ -311,7 +384,6 @@ void stop_Measuring(){
 
 void stop_CollectingData(){
     stage = FooStage;
-    measure.TickCounter = 0;
 }
 
 void error_msg(){
