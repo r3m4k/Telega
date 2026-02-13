@@ -112,10 +112,10 @@ int main()
 
     // Скопируем исходную таблицу прерываний
     for(uint8_t i = 0; i < IST_VECTORS_NUM; i++){
-        __user_vector_table[i] = __isr_vectors[i];
+        _user_vector_table[i] = __isr_vectors[i];
     }
 
-    SCB->VTOR = (uint32_t)__user_vector_table;
+    SCB->VTOR = (uint32_t)_user_vector_table;
 
     __DSB();
     __ISB();

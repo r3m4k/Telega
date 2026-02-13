@@ -45,12 +45,13 @@ extern uint8_t ConfirmMessage[MaxCommand_Length];
 extern uint8_t EndOfInitialSetting[MaxCommand_Length];
 
 /* Global variables ---------------------------------------------------------*/
-
 extern pHandler __isr_vectors[];
+
+// ----------------------------------------------------------------------------
 
 // Собственная таблица прерываний
 __attribute__((aligned(128)))    // Cortex-M4 требует выравнивание по 128 байт!
-__user_pHandler __user_vector_table[IST_VECTORS_NUM] = {0};
+_user_pHandler _user_vector_table[IST_VECTORS_NUM] = {0};
 
 // -------------------------------------------------------------------------------
 
@@ -67,8 +68,6 @@ auto stage = ProgramStages::FooStage;
 auto previous_stage = ProgramStages::BeforeBeginning;
 
 // ----------------------------------------------------------------------------
-// Пользовательские экземпляры классов
-// Measure measure(55.7522 * PI / 180, TIM_PERIOD * 0.00001);
 
 uint32_t tick_counter = 0;      // Счётчик тиков основного таймера
 volatile bool timer_tick_flag = false;
@@ -106,34 +105,40 @@ STM_CppLib::STM_Timer::Timer4<[](){
 
 int main()
 {
-    // ##########################
+    /* ***********************************************************************
+    * Загрузим собственную таблицу прерываний для возможности её модификации
+    *********************************************************************** */
 
-    // Загрузим собственную таблицу прерываний
-    __disable_irq();
+    __disable_irq();    // Отключим прерывания
 
     // Скопируем исходную таблицу прерываний
-    for(uint8_t i = 0; i < IST_VECTORS_NUM; i++){
-        __user_vector_table[i] = __isr_vectors[i];
-    }
+    memcpy(_user_vector_table, __isr_vectors, IST_VECTORS_NUM);
 
-    SCB->VTOR = (uint32_t)__user_vector_table;
+    SCB->VTOR = (uint32_t)_user_vector_table;
 
-    __DSB();
-    __ISB();
+    __DSB();    // Ожидаем завершения записи в регистр VTOR
+    __ISB();    // Сбрасываем конвейер команд, чтобы следующие инструкции и прерывания
+                // использовали новую таблицу векторов
 
-    __enable_irq();
+    __enable_irq();     // Включим прерывания
 
+    // ---------------------------------------------------------------------------
+
+    // Получаем текущие значения тактовых частот системы и настроим
+    // SysTick для генерации прерываний с периодом 1 мс
 	RCC_GetClocksFreq(&RCC_Clocks);
 	if (SysTick_Config(RCC_Clocks.HCLK_Frequency / 1000))
-		while(true) {}     //will end up in this infinite loop if there was an error with Systick_Config
+		while(true) {}     // Если конфигурация SysTick завершилась ошибкой – входим в бесконечный цикл
     
-    // ##########################
+    // ---------------------------------------------------------------------------
 
     // Инициализируем всё оборудования
     InitAll();             
     
     // Поморгаем светодиодами после успешной инициализации
     leds.ToggleLeds();
+
+    // ---------------------------------------------------------------------------
 
     // Используемые фильтры
     NSigmaFilter<2.0f, 4, 16> filter_acc;
@@ -147,7 +152,8 @@ int main()
     STM_CppLib::STM_Packages::TelegaPackage telega_package(
         &acc_value, &gyro_value, &acc_value
     );
-   
+
+    // ---------------------------------------------------------------------------
     // Основной цикл программы
     while (true)
     {
