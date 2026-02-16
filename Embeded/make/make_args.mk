@@ -64,7 +64,6 @@ GPP_FLAGS = -std=gnu++2a ${COMPILER_FLAGS} -c -fno-exceptions -fno-rtti -fno-use
 
 INCLUDES = \
 -I"${GCC_PLACE}/arm-none-eabi/include" \
--I"${SOURCE_DIR}/include" \
 -I"${SOURCE_DIR}/user" \
 -I"${SOURCE_DIR}/user/inc" \
 -I"${SOURCE_DIR}/user/inc/aaa_Project_Files" \

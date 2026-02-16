@@ -84,7 +84,7 @@ STM_CppLib::LSM303DLHC  sensor_LSM303DLHC;      // Встроенный датч
 STM_CppLib::Commands::CommandManager command_manager;
 
 // Интерфейсы связи
-STM_CppLib::ComPort com_port;
+STM_CppLib::ComPort::ComPort com_port;
 
 // Используемые таймеры
 STM_CppLib::STM_Timer::Timer3<[](){
@@ -126,9 +126,10 @@ int main()
 
     // Получаем текущие значения тактовых частот системы и настроим
     // SysTick для генерации прерываний с периодом 1 мс
+    // Если конфигурация SysTick завершилась ошибкой – входим в бесконечный цикл
 	RCC_GetClocksFreq(&RCC_Clocks);
 	if (SysTick_Config(RCC_Clocks.HCLK_Frequency / 1000))
-		while(true) {}     // Если конфигурация SysTick завершилась ошибкой – входим в бесконечный цикл
+		while(true) {}
     
     // ---------------------------------------------------------------------------
 
@@ -318,57 +319,8 @@ void LedOff(Led_TypeDef Led){  leds.LedOff(Led);  }
 
 // -------------------------------------------------------------------------------
 // Собственный callback для отработки поступления нового сообщения по com порту
-// TODO: перенести эту логику в класс ComPort
 void UserEP3_OUT_Callback(uint8_t *buffer){
-    uint8_t bt;                 // Текущий обрабатываемый байт сообщения
-    uint16_t con_sum = 0;       // Посчитанная контрольная сумма
-    uint8_t len;                // Длина данных в сообщении
-    uint8_t dataIndex = 0;      // Текущий индекс информации в сообщении 
-
-    for(uint8_t i = 0; i < 64; i++){        // hw_config.c --> len(buffer) = 64
-        bt = buffer[i];
-        switch (decode_stage)
-        {
-        case Want7E:
-            if (bt == 0x7e){
-                decode_stage = WantE7;
-                con_sum += bt;
-            } else    decode_stage = Want7E;
-            break;
-        case WantE7:
-            if (bt == 0xe7){
-                decode_stage = WantFormat;
-                con_sum += bt;
-            } else    decode_stage = Want7E;
-            break;
-        case WantFormat:
-            if (bt == 0xff){
-                decode_stage = WantData;
-                con_sum += bt;
-                len = 2;        // Количество байт данных в сообщении с форматом 0xff
-            } else    decode_stage = Want7E;
-            break;
-        case WantData:
-            if (dataIndex < len){
-                con_sum += bt;
-                dataIndex++;
-            }
-
-            if (dataIndex == len){
-                decode_stage = WantConSum; 
-            }
-            break;
-        
-        case WantConSum:
-            decode_stage = Want7E;
-            if (uint8_t(con_sum) == bt){
-                COM_port.sending_package(ConfirmMessage, MaxCommand_Length);
-                COM_port.new_message(buffer);
-                return;
-            }
-            break;
-        }
-    }
+    STM_CppLib::Message message(buffer);
 }
 
 // Функции для обработки поступивших команд
@@ -392,10 +344,6 @@ void stop_CollectingData(){
     stage = FooStage;
 }
 
-void error_msg(){
-    com_port.sending_package(ErrorMessage, MaxCommand_Length);
-    Delay(1000);
-}
 // -------------------------------------------------------------------------------
 
 void Error_Handler(void)

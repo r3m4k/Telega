@@ -1,6 +1,6 @@
 /* Define to prevent recursive inclusion -------------------------------------*/
-#ifndef __USART_HPP
-#define __USART_HPP
+#ifndef USART_HPP
+#define USART_HPP
 
 /* Includes ------------------------------------------------------------------*/
 #include "stm32f30x_gpio.h"
@@ -98,4 +98,4 @@ namespace STM_CppLib{
 
 
 
-#endif /*   __USART_HPP   */
+#endif /*   USART_HPP   */
