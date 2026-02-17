@@ -50,7 +50,7 @@ void start_InitialSetting(void);
 void start_Measuring(void);
 void stop_Measuring(void);
 void stop_CollectingData(void);
-void error_msg(void);
+void send_error_msg(void);
 
 void Delay(__IO uint32_t nTime);
 void TimingDelay_Decrement(void);

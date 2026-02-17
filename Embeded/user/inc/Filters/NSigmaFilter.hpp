@@ -1,14 +1,19 @@
 /** ****************************************************************************
  * @file    NSigmaFilter.hpp
- * @brief   Фильтр N-сигма для TriaxialData
+ * @brief   Шаблонный фильтр N-сигма для различных типов данных
  * @author  Романовский Роман
  * @date    Февраль 2026
  * 
  * @details Реализует двухуровневую фильтрацию выбросов на основе правила N*sigma.
+ *          Тип обрабатываемых данных задаётся шаблонным параметром T. Поддерживаются:
+ *          - TriaxialData (трёхосные векторы) – фильтрация покоординатно;
+ *          - типы с плавающей точкой (float, double) – скалярная фильтрация.
+ *          Другие типы (целочисленные, пользовательские) не допускаются.
+ *          
  *          Первый уровень – обработка пакетов фиксированной длины, отбрасывание
  *          отсчётов, выходящих за пределы N*sigma от среднего значения пакета.
  *          Второй уровень – накопление очищенных значений из нескольких пакетов
- *          и вычисление итогового среднего.
+ *          и вычисление итогового среднего (по алгоритму Уэлфорда).
  **************************************************************************** */
 
 /* Define to prevent recursive inclusion -------------------------------------*/
@@ -17,6 +22,8 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include <stdint.h>
+#include <type_traits>
+#include <cmath>
 
 #include "TriaxialData.hpp"
 #include "Stats.hpp"
@@ -26,50 +33,48 @@
 /* Global variables ----------------------------------------------------------*/
 
 /** ****************************************************************************
- * @brief Класс для реализации фильтра "N сигма" для 3-х компонентных данных
+ * @brief   Шаблонный класс фильтра N-сигма.
  * 
- * @tparam N              Коэффициент N для правила N*sigma (порог отбраковки)
- * @tparam FilterFrameNum Количество кадров, накапливаемых для итогового результата
- * @tparam FilterFrameLen Длина одного кадра (количество отсчётов в пакете)
+ * @tparam T                Тип обрабатываемых данных.
+ *                          Должен поддерживать операции, необходимые для работы Stats<T>.
+ * @tparam N                Коэффициент N для правила N*sigma (порог отбраковки).
+ * @tparam FilterFrameNum   Количество кадров, накапливаемых для итогового результата.
+ * @tparam FilterFrameLen   Длина одного кадра (количество отсчётов в пакете).
  * 
- * @details Фильтр работает с потоком трёхосных измерений.
- *          Кадры заполняются последовательно, после заполнения кадра
- *          вычисляются его среднее и дисперсия (через Stats), затем отсчёты,
- *          отклоняющиеся от среднего более чем на N * σ, отбрасываются.
- *          Прошедшие отсчёты используются для обновления скользящего среднего
- *          (алгоритм Уэлфорда для среднего). После накопления FilterFrameNum
- *          кадров итоговое среднее становится доступным.
+ * @details Фильтр работает с потоком данных типа T. Кадры заполняются последовательно,
+ *          после заполнения кадра вычисляются его среднее и дисперсия (через Stats),
+ *          затем отсчёты, отклоняющиеся от среднего более чем на N * sigma, отбрасываются.
+ *          Прошедшие отсчёты используются для обновления скользящего среднего.
  **************************************************************************** */
-
-template<float N, uint8_t FilterFrameNum, uint8_t FilterFrameLen>
+template<typename T, float N, uint8_t FilterFrameNum, uint8_t FilterFrameLen>
 class NSigmaFilter{
     static_assert(FilterFrameLen > 0, "Frame length must be positive");
     static_assert(FilterFrameNum > 0, "Number of frames must be positive");
 
 private:
-    TriaxialData array[FilterFrameLen];          ///< Буфер текущего кадра
-    Stats<TriaxialData, FilterFrameLen> stats;   ///< Объект для статистики кадра
+    T array[FilterFrameLen];          ///< Буфер текущего кадра
+    Stats<T, FilterFrameLen> stats;   ///< Объект для статистики кадра
     
     bool data_ready_flag;      ///< Флаг готовности отфильтрованных данных
     uint8_t frame_index;       ///< Счётчик обработанных кадров
     uint8_t data_index;        ///< Индекс заполнения буфера кадра
     
-    TriaxialData filtered_value;    ///< Накопленное отфильтрованное среднее (по осям)
-    TriaxialData counter;           ///< Счётчик прошедших фильтр отсчётов (по осям)
+    T filtered_value;    ///< Накопленное отфильтрованное среднее (тип T)
+    T counter;           ///< Счётчик прошедших фильтр отсчётов (для каждой координаты/скалярно)
 
 public:
     /**
-     * @brief Конструктор по умолчанию
+     * @brief Конструктор по умолчанию.
      * 
-     * Инициализирует stats переданным массивом, сбрасывает счётчики,
-     * обнуляет filtered_value и counter.
+     * Инициализирует stats ссылкой на внутренний массив, сбрасывает счётчики,
+     * обнуляет filtered_value и counter (через value-инициализацию T).
      */
     NSigmaFilter(): 
         stats(array), data_ready_flag(false), frame_index(0),
         data_index(0), filtered_value(), counter() {}
 
     /**
-     * @brief Проверка готовности отфильтрованного значения
+     * @brief Проверка готовности отфильтрованного значения.
      * @return true  – данные готовы (можно вызывать get_filtered_data());
      *         false – данные ещё накапливаются.
      */
@@ -78,17 +83,18 @@ public:
     }
 
     /**
-     * @brief Получить отфильтрованное значение
-     * @return Объект TriaxialData с итоговым средним по каждой оси
+     * @brief Получить отфильтрованное значение.
+     * @return Объект типа T с итоговым средним (покоординатно для TriaxialData,
+     *         скалярное значение для плавающих типов).
      * @note После вызова этого метода фильтр переходит в состояние «данные готовы».
      *       Для нового цикла фильтрации необходимо вызвать reset().
      */
-    TriaxialData get_filtered_data(){
+    T get_filtered_data(){
         return filtered_value;
     }
 
     /**
-     * @brief Сброс состояния фильтра для нового цикла обработки
+     * @brief Сброс состояния фильтра для нового цикла обработки.
      * 
      * Очищает флаги готовности, обнуляет счётчики кадров и индексы,
      * сбрасывает накопленное среднее и счётчик отсчётов, а также
@@ -98,14 +104,14 @@ public:
         data_ready_flag = false;
         data_index = 0;
         frame_index = 0;
-        filtered_value = TriaxialData(); 
-        counter = TriaxialData();
+        filtered_value = T(); 
+        counter = T();
         stats.reset();   
     }
 
     /**
-     * @brief Добавление нового значения в фильтр
-     * @param[in] val Очередное трёхосное измерение
+     * @brief Добавление нового значения в фильтр.
+     * @param[in] val Очередное измерение типа T.
      * @return true  – значение принято, фильтрация продолжается;
      *         false – данные уже отфильтрованы, значение не добавлено.
      * 
@@ -116,7 +122,7 @@ public:
      *          Когда количество обработанных кадров достигает FilterFrameNum,
      *          устанавливается флаг готовности.
      */
-    bool append_value(const TriaxialData& val) {
+    bool append_value(const T& val) {
         // Если фильтр уже накопил достаточное количество кадров и результат готов,
         // дальнейшее добавление данных блокируется до вызова reset()
         if (data_ready_flag) {
@@ -146,30 +152,47 @@ public:
 
 private:
     /**
-     * @brief Фильтрация одного полного кадра данных
+     * @brief Фильтрация одного полного кадра данных.
      * 
-     * @details Вычисляет среднее и дисперсию кадра (через Stats), затем
-     *          СКО = sqrt(дисперсия). Для каждой координаты каждого отсчёта
-     *          проверяется условие |x - mean| <= N * sigma. Если условие выполняется,
-     *          отсчёт считается «чистым» и используется для обновления
-     *          накопленного среднего по алгоритму Уэлфорда:
-     *          filtered_value[coord] += (value - filtered_value[coord]) / (++counter[coord]).
-     *          После обработки кадра внутренняя статистика сбрасывается (stats.reset()).
+     * @details Метод специализирован для двух категорий типов:
+     *          - TriaxialData: вычисляет среднее, дисперсию и СКО (через calc_sqrt()),
+     *            затем покоординатно проверяет условие N*sigma и обновляет скользящее среднее.
+     *          - Плавающие типы (float, double): использует std::sqrt для СКО,
+     *            выполняет скалярную проверку и обновление.
+     *          Для любых других типов компиляция прерывается статическим утверждением.
+     *          После обработки кадра статистика сбрасывается (stats.reset()).
      */
-    void frame_filtering(){
-        // Получим статистические значения
-        TriaxialData mean = stats.get_mean();
-        TriaxialData variance = stats.get_variance();
-        TriaxialData sigma = variance.calc_sqrt();
+    void frame_filtering() {
+        if constexpr (std::is_same_v<T, TriaxialData>) {
+            // Специализация для TriaxialData
+            TriaxialData mean = stats.get_mean();
+            TriaxialData variance = stats.get_variance();
+            TriaxialData sigma = variance.calc_sqrt();
 
-        // Отфильтруем данные по правилу N*sigma
-        for (uint8_t coord = 0; coord < 3; coord++){
-            for(uint8_t i = 0; i < FilterFrameLen; i++){
-                if ( (array[i][coord] >= (mean[coord] - N * sigma[coord])) && 
-                     (array[i][coord] <= (mean[coord] + N * sigma[coord])) ){
-                    filtered_value[coord] += (array[i][coord] - filtered_value[coord]) / (++counter[coord]);
+            for (uint8_t coord = 0; coord < 3; ++coord) {
+                for (uint8_t i = 0; i < FilterFrameLen; ++i) {
+                    if ( (array[i][coord] >= mean[coord] - N * sigma[coord]) &&
+                         (array[i][coord] <= mean[coord] + N * sigma[coord]) ) {
+                        filtered_value[coord] += (array[i][coord] - filtered_value[coord]) / (++counter[coord]);
+                    }
                 }
             }
+        }
+        else if constexpr (std::is_floating_point_v<T>) {
+            // Обобщённая ветка для типов с плавающей точкой (float, double)
+            T mean = stats.get_mean();
+            T variance = stats.get_variance();
+            T sigma = std::sqrt(variance);
+
+            for (uint8_t i = 0; i < FilterFrameLen; ++i) {
+                if ((array[i] >= mean - N * sigma) && (array[i] <= mean + N * sigma)) {
+                    filtered_value += (array[i] - filtered_value) / (++counter);
+                }
+            }
+        }
+        else {
+            // Запрещаем использование целочисленных и других неподдерживаемых типов
+            static_assert(sizeof(T) == 0, "NSigmaFilter: type must be TriaxialData or floating point");
         }
 
         // Сбросим статистику

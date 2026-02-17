@@ -311,7 +311,7 @@ void stop_CollectingData(){
     measure.TickCounter = 0;
 }
 
-void error_msg(){
+void send_error_msg(){
     com_port.sending_package(ErrorMessage, MaxCommand_Length);
     Delay(1000);
 }

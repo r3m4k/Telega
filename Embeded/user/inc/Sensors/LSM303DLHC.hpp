@@ -10,8 +10,8 @@
 #include "SensorScaler.hpp"
 
 /* Defines -------------------------------------------------------------------*/
-#define USE_MAGNETIC_SENSOR
-// #define USE_TEMPERATURE_SENSOR
+// #define USE_MAGNETIC_SENSOR
+#define USE_TEMPERATURE_SENSOR
 
 #define AccCoeff        0.01        // Коэффициент перевода ускорения               [mg] --> [g] 
 #define MagCoeff        100000      // Коэффициент перевода магнитной индукции      [G] --> [nT]
@@ -63,12 +63,13 @@ namespace STM_CppLib{
             AccInit();
             MagInit();
 
-            // Вычислим масштабирующий коэффициент
+            // Вычислим масштабирующий коэффициент для ускорения
             SensorScaller<LSM303DLHC> acc_scaller{this, &acc_data, TrueMoscowAcc};
             acc_scaller.Init();
             acc_scale_rate = acc_scaller.scale_rate;
         }
     
+    private:
         // Инициализация акселерометра
         void AccInit(){
             // ----------------------------------------------------------------

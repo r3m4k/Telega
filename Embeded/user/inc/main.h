@@ -2,14 +2,16 @@
 #ifndef __MAIN_H
 #define __MAIN_H
 
-/* Includes Global files ----------------------------------------------------*/
-#include <math.h>
-#include <stdlib.h>
-#include "diag/Trace.h"
+/* --------------------------------------------------------------------------*/
 
 #ifdef __cplusplus
  extern "C" {
 #endif 
+
+/* Includes Global files ----------------------------------------------------*/
+#include <math.h>
+#include <stdlib.h>
+#include "diag/Trace.h"
 
 /* Includes StmLib files ----------------------------------------------------*/
 #include "stm32f30x.h"
@@ -87,12 +89,15 @@
 #endif 
 
 void InitAll();
-
-void update_package_data();
-void send_package();
-
 void UserEP3_OUT_Callback(uint8_t *buffer);
-void USART1_IRQHandler(void);
+
+void restart(void);
+void start_InitialSetting(void);
+void start_Measuring(void);
+void stop_Measuring(void);
+void stop_CollectingData(void);
+void send_hello_msg(void);
+void send_error_msg(void);
 
 void Delay(__IO uint32_t nTime);
 void TimingDelay_Decrement(void);

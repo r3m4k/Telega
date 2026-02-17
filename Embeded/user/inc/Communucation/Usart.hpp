@@ -96,6 +96,4 @@ namespace STM_CppLib{
     };
 } // namespace STM_CppLib
 
-
-
 #endif /*   USART_HPP   */

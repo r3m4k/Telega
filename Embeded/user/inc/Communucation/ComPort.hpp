@@ -12,6 +12,7 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include <stdint.h>
+#include <string.h>
 #include <concepts>
 
 #include "VCP_F3.h"
@@ -109,8 +110,7 @@ namespace STM_CppLib{
         }
 
         /**
-         * @brief   Отправка предопределённого сообщения об ошибке.
-         * @details Формирует сообщение с кодом ошибки и отправляет его через SendMessage.
+         * @brief   Отправка сообщения об ошибке.
          */
         void SendErrorMessage(){
             constexpr uint8_t ErrorMessage[MessageLength] = {0x7e, 0xe7, 0xff, 0xff, 0xff, 0x62, 0};
@@ -119,11 +119,27 @@ namespace STM_CppLib{
 
         /**
          * @brief   Отправка подтверждающего сообщения.
-         * @details Формирует сообщение с кодом подтверждения и отправляет его через SendMessage.
          */
         void SendConfirmMessage(){
             constexpr uint8_t ConfirmMessage[MessageLength] = {0x7e, 0xe7, 0xff, 0xaa, 0xaa, 0xb8, 0};
             SendMessage(Message(ConfirmMessage));
+        }
+
+        /**
+         * @brief   Отправка приветственного сообщения.
+         */
+        void SendHelloMessage(){
+            const char* text = "STM_Telega by Romanovskiy Roma\n";
+            STM_CppLib::Message message(reinterpret_cast<const uint8_t*>(text), strlen(text));
+            SendMessage(message);
+        }
+
+        /**
+         * @brief   Отправка сообщения завершения выставки датчиков.
+         */
+        void SendEndOfInitialSettingMessage(){
+            constexpr uint8_t EndOfInitialSettingMessage[MessageLength] = {0x7e, 0xe7, 0xff, 0xba, 0xab, 0xc9, 0};
+            SendMessage(Message(EndOfInitialSettingMessage));
         }
     };
 

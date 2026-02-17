@@ -61,7 +61,7 @@ typedef struct Commands
     // Неизвестная команда
     Command unknown_command = {
         .command_code = {0},
-        .command_function = (error_msg)
+        .command_function = (send_error_msg)
     };
 
 } Commands;

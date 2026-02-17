@@ -52,7 +52,7 @@ namespace STM_CppLib{
          *                   По умолчанию копируется MessageLength байт.
          * @warning Если size превышает MessageLength, произойдёт переполнение буфера.
          */
-        Message(uint8_t *buffer, uint8_t size = MessageLength){
+        Message(const uint8_t *buffer, uint8_t size = MessageLength){
             if (size > MessageLength) size = MessageLength;
             memcpy(bytes_msg, buffer, size);
         }
