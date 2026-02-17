@@ -40,9 +40,15 @@ __IO uint8_t buttonState;
 
 
 /* Global variables ---------------------------------------------------------*/
+typedef void
+(* const pHandler)(void);
+
 extern pHandler __isr_vectors[];
 
 // ----------------------------------------------------------------------------
+#define IST_VECTORS_NUM     98
+#define InitFrameNum        256
+ 
 
 // Собственная таблица прерываний
 __attribute__((aligned(128)))    // Cortex-M4 требует выравнивание по 128 байт!
@@ -55,7 +61,7 @@ enum class ProgramStages{
     BeforeBeginning,    // Фиктивная стадия программы (необходима для индикации первой смены стадии программы)
     FooStage,           // Данные с датчиков считываются, но не фильтруются и не отправляются
     InitialSetting,     // Сбор и отправка данных для выставки 
-    Measuring           // Сбор и отправка данных с частотой 4 Гц
+    Measuring,          // Сбор и отправка данных с частотой 4 Гц
 };
 
 // Тк будем менять стадии программы из других файлов, то разместим стадии в глобальной зоне видимости
@@ -107,7 +113,7 @@ int main()
     __disable_irq();    // Отключим прерывания
 
     // Скопируем исходную таблицу прерываний
-    memcpy(_user_vector_table, __isr_vectors, IST_VECTORS_NUM);
+    memcpy(_user_vector_table, __isr_vectors, IST_VECTORS_NUM * sizeof(pHandler));
 
     SCB->VTOR = (uint32_t)_user_vector_table;
 
@@ -137,9 +143,9 @@ int main()
     // ---------------------------------------------------------------------------
 
     // Используемые фильтры
-    NSigmaFilter<TriaxialData, 2.0f, 4, 16> filter_acc;     // Фильтр ускорений
-    NSigmaFilter<TriaxialData, 2.0f, 4, 16> filter_gyro;    // Фильтр угловой скорости 
-    NSigmaFilter<float, 2.0f, 1, 16>        filter_temp;    // Фильтр температуры
+    NSigmaFilter<TriaxialData, 4, 16> filter_acc(2.0);     // Фильтр ускорений
+    NSigmaFilter<TriaxialData, 4, 16> filter_gyro(2.0);    // Фильтр угловой скорости 
+    NSigmaFilter<float, 1, 16>        filter_temp(2.0);    // Фильтр температуры
 
     // Значения ускорений, угловой скорости и температуры для отправки
     TriaxialData acc_value;
@@ -175,8 +181,8 @@ int main()
         switch (stage)
         {
         case ProgramStages::FooStage:
-            if (previous_stage != FooStage){
-                previous_stage = FooStage;
+            if (previous_stage != ProgramStages::FooStage){
+                previous_stage = ProgramStages::FooStage;
                 timer4.Stop();
                 timer4.ResetCounter();
                 leds.LedsOn();
@@ -190,8 +196,8 @@ int main()
             break;
 
         case ProgramStages::InitialSetting:
-            if (previous_stage != InitialSetting){
-                previous_stage = InitialSetting;
+            if (previous_stage != ProgramStages::InitialSetting){
+                previous_stage = ProgramStages::InitialSetting;
                 tick_counter = 0;
                 sensor_reading_counter = 0;
                 leds.LedsOff();
@@ -199,15 +205,12 @@ int main()
                 timer4.Start();
             }
 
-            // Количество пакетов для выставки датчиков
-            constexpr int FilterFrame_num = 256;
-
             // Сбросим фильтры перед сбором данных
             filter_acc.reset();
             filter_gyro.reset();
             filter_temp.reset();
 
-            for(int i = 0; i < FilterFrame_num; i++){
+            for(int i = 0; i < InitFrameNum; i++){
 
                 /* ***************************************************************
                 * Параметры фильтров подобраны так, что все фильтры готовятся за 
@@ -248,14 +251,14 @@ int main()
             }
 
             // В конце отправим сообщение об окончании выставки
-            com_port.SendEndOfInitialSettingMessage();
+            send_end_of_initial_setting_msg();
 
             stage = ProgramStages::FooStage;
             break;
 
         case ProgramStages::Measuring:
-            if (previous_stage != Measuring){
-                previous_stage = Measuring;
+            if (previous_stage != ProgramStages::Measuring){
+                previous_stage = ProgramStages::Measuring;
                 tick_counter = 0;
                 sensor_reading_counter = 0;
                 leds.LedsOff();
@@ -279,10 +282,10 @@ int main()
 
                 while(!filter_acc.is_data_filtered() || !filter_gyro.is_data_filtered() || !filter_temp.is_data_filtered()){
                     // Считаем значения и добавим полученные значения в фильтры
-                    sensor_L3GD20.ReadData();
+                    sensor_L3GD20.ReadGyro();
                     filter_gyro.append_value(sensor_L3GD20.gyro_data);
 
-                    sensor_LSM303DLHC.ReadData();
+                    sensor_LSM303DLHC.ReadAcc();
                     filter_acc.append_value(sensor_LSM303DLHC.acc_data);
     
                     // Данные температуры будем считывать в 4 раза реже
@@ -341,6 +344,7 @@ void InitAll(){
 // Собственный callback для отработки поступления нового сообщения по com порту
 void UserEP3_OUT_Callback(uint8_t *buffer){
     STM_CppLib::Message message(buffer);
+    com_port.EP3_OUT_Callback(message);
 }
 
 // Функции для обработки поступивших команд
@@ -349,27 +353,43 @@ void restart(){
 }
 
 void start_InitialSetting(){
-    stage = InitialSetting;
+    stage = ProgramStages::InitialSetting;
 }
 
 void start_Measuring(){
-    stage = Measuring;
+    stage = ProgramStages::Measuring;
 }
 
 void stop_Measuring(){
-    stage = FooStage;
+    stage = ProgramStages::FooStage;
 }
 
 void stop_CollectingData(){
-    stage = FooStage;
+    stage = ProgramStages::FooStage;
+}
+
+void send_confirm_msg(){
+    constexpr uint8_t ConfirmMessage[MessageLength] = {0x7e, 0xe7, 0xff, 0xaa, 0xaa, 0xb8, 0};
+    STM_CppLib::Message message(ConfirmMessage);
+    com_port.SendMessage(message);
 }
 
 void send_hello_msg(){
-    com_port.SendHelloMessage();
+    const char* text = "STM_Telega by Romanovskiy Roma\n";
+    STM_CppLib::Message message(reinterpret_cast<const uint8_t*>(text), strlen(text));
+    com_port.SendMessage(message);
 }
 
 void send_error_msg(){
-    com_port.SendErrorMessage();
+    constexpr uint8_t ErrorMessage[MessageLength] = {0x7e, 0xe7, 0xff, 0xff, 0xff, 0x62, 0};
+    STM_CppLib::Message message(ErrorMessage);
+    com_port.SendMessage(message);   // В таком случае передаём lvalue ссылку
+}
+
+void send_end_of_initial_setting_msg(){
+    constexpr uint8_t EndOfInitialSettingMessage[MessageLength] = {0x7e, 0xe7, 0xff, 0xba, 0xab, 0xc9, 0};
+    STM_CppLib::Message message(EndOfInitialSettingMessage);
+    com_port.SendMessage(message);
 }
 
 // -------------------------------------------------------------------------------

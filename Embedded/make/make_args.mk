@@ -11,7 +11,7 @@ SYSTEM := windows
 PROGRAM_NAME := STM_PROJECT
 
 # Директория с исходным кодом относительно Makefile.mk
-SOURCE_DIR = D:/Job/STM_Gyronavt
+SOURCE_DIR = D:/Job/Telega/Embedded
 
 # Название итогового исполняемого файла
 BINARY = ${PROGRAM_NAME}.elf
@@ -69,7 +69,7 @@ INCLUDES = \
 -I"${SOURCE_DIR}/user/inc/aaa_Project_Files" \
 -I"${SOURCE_DIR}/user/inc/aaa_Project_Files/DataFilters" \
 -I"${SOURCE_DIR}/user/inc/Common" \
--I"${SOURCE_DIR}/user/inc/CommunicationInterfaces" \
+-I"${SOURCE_DIR}/user/inc/Communication" \
 -I"${SOURCE_DIR}/user/inc/DataContainers" \
 -I"${SOURCE_DIR}/user/inc/Filters" \
 -I"${SOURCE_DIR}/user/inc/Packages" \

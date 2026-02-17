@@ -98,8 +98,8 @@ private:
      * @brief Вычисление среднего значения и дисперсии
      */
     void count_mean_and_variance(){
-        T mean = 0;
-        T M2 = 0;  // Сумма квадратов отклонений
+        T mean = T();
+        T M2 = T();  // Сумма квадратов отклонений
         
         for (uint32_t i = 0; i < N; i++){
             T delta = data_ptr[i] - mean;

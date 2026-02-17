@@ -14,6 +14,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include <stdint.h>
 
+#include "main.h"
 #include "Message.hpp"
 #include "CommandProcessing.hpp"
 #include "ComPort.hpp"
@@ -22,7 +23,6 @@
 
 /* Global variables ----------------------------------------------------------*/
 extern STM_CppLib::Commands::CommandManager command_manager;
-extern STM_CppLib::ComPort::ComPort com_port;
 
 // -----------------------------------------------------------------------------
 /**
@@ -131,13 +131,13 @@ private:
         case DecoderStages::WantConSum:
             decode_stage = DecoderStages::Want7E;
             if (uint8_t(con_sum) == bt){
-                com_port.SendConfirmMessage();
-                const Command* command = command_manager.match_message_to_command(current_message);
+                send_confirm_msg();
+                const STM_CppLib::Commands::Command* command = command_manager.match_message_to_command(current_message);
                 if (command){
-                    command_manager.add_command(command);
+                    command_manager.add_command(*command);
                 }
                 else {
-                    com_port.SendErrorMessage();
+                    send_error_msg();
                 }
             }
             break;

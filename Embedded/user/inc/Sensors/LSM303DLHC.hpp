@@ -50,6 +50,7 @@ namespace STM_CppLib{
     #endif /*   USE_MAGNETIC_SENSOR   */
 
     #ifdef USE_TEMPERATURE_SENSOR
+    public:
         float temperature;
     #endif /*    USE_TEMPERATURE_SENSOR   */
 
@@ -158,7 +159,8 @@ namespace STM_CppLib{
             InitStruct.Temperature_Sensor = LSM303DLHC_TEMPSENSOR_ENABLE;   /*!< Temp sensor enable */
 
             LSM303DLHC_MagInit(&InitStruct);
-
+    
+        #ifdef USE_MAGNETIC_SENSOR
             // ----------------------------------------------------------------
             // Установим чувствительность магнитометра
             switch (InitStruct.MagFull_Scale)
@@ -192,7 +194,7 @@ namespace STM_CppLib{
                 Mag_Sensitivity_Z = LSM303DLHC_M_SENSITIVITY_Z_8_1Ga;
                 break;
             }            
-
+        #endif /*   USE_MAGNETIC_SENSOR   */
         }
 
         // ------------------------------

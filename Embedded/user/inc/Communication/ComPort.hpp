@@ -45,7 +45,8 @@ namespace STM_CppLib{
      *          Используется для статической проверки совместимости декодера
      *          с классом ComPort.
      */
-    concept HasVoidMessageProcessing = requires(Decoder decoder, STM_CppLib::Message& msg) {
+    template<typename T>
+    concept HasVoidMessageProcessing = requires(T decoder, STM_CppLib::Message& msg) {
         { decoder.message_processing(msg) } -> std::same_as<void>;
     };
 
@@ -56,7 +57,7 @@ namespace STM_CppLib{
      */
     class ComPort{
 
-        static_assert(HasVoidMessageProcessing,
+        static_assert(HasVoidMessageProcessing<Decoder>,
             "\n=== DECODER INTERFACE ERROR ===\n"
             "Decoder type must provide: void message_processing(STM_CppLib::Message&)\n"
             "===============================\n");
@@ -88,7 +89,7 @@ namespace STM_CppLib{
          * @brief   Отправка пакета данных через COM-порт.
          * @param   package   Ссылка на базовый пакет (BasePackage), содержащий данные и длину.
          */
-        void SendPackage(const STM_Packages::BasePackage& package){
+        void SendPackage(STM_Packages::BasePackage& package){
             CDC_Send_DATA(package.data_ptr, package.len);
         }
 
@@ -96,7 +97,7 @@ namespace STM_CppLib{
          * @brief   Отправка сообщения фиксированной длины через COM-порт.
          * @param   message   Ссылка на объект Message, содержащий массив байт.
          */
-        void SendMessage(const Message& message){
+        void SendMessage(Message& message){
             CDC_Send_DATA(message.bytes_msg, MessageLength);
         }
 
@@ -107,39 +108,6 @@ namespace STM_CppLib{
          */
         void EP3_OUT_Callback(STM_CppLib::Message& message){
             decoder.message_processing(message);
-        }
-
-        /**
-         * @brief   Отправка сообщения об ошибке.
-         */
-        void SendErrorMessage(){
-            constexpr uint8_t ErrorMessage[MessageLength] = {0x7e, 0xe7, 0xff, 0xff, 0xff, 0x62, 0};
-            SendMessage(Message(ErrorMessage));
-        }
-
-        /**
-         * @brief   Отправка подтверждающего сообщения.
-         */
-        void SendConfirmMessage(){
-            constexpr uint8_t ConfirmMessage[MessageLength] = {0x7e, 0xe7, 0xff, 0xaa, 0xaa, 0xb8, 0};
-            SendMessage(Message(ConfirmMessage));
-        }
-
-        /**
-         * @brief   Отправка приветственного сообщения.
-         */
-        void SendHelloMessage(){
-            const char* text = "STM_Telega by Romanovskiy Roma\n";
-            STM_CppLib::Message message(reinterpret_cast<const uint8_t*>(text), strlen(text));
-            SendMessage(message);
-        }
-
-        /**
-         * @brief   Отправка сообщения завершения выставки датчиков.
-         */
-        void SendEndOfInitialSettingMessage(){
-            constexpr uint8_t EndOfInitialSettingMessage[MessageLength] = {0x7e, 0xe7, 0xff, 0xba, 0xab, 0xc9, 0};
-            SendMessage(Message(EndOfInitialSettingMessage));
         }
     };
 

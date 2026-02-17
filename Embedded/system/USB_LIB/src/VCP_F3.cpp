@@ -22,12 +22,10 @@ Return value		: NONE
 unsigned char VCP_STATIC_BFR[VCP_BUF_SIZE];
 void VCP_Init(void)
 {
-    // VCP_Buff.Init(VCP_BUF_SIZE, (int)&VCP_STATIC_BFR);
     Set_System();
     Set_USBClock();
     USB_Interrupts_Config();
     USB_Init();
-    // packet_sent=1;
 }
 
 /*********************************************************************************************

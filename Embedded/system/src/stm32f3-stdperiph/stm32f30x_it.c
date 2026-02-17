@@ -28,6 +28,7 @@
  */
 
 /* Includes ------------------------------------------------------------------*/
+#include "stm32f3_discovery.h"
 #include "stm32f30x_it.h"
 #include "main.h"
 #include "usb_istr.h"
@@ -78,8 +79,6 @@ void NMI_Handler(void)
 
 void HardFault_Handler(void)
 {
-    LedsOff();
-    LedOn(LED3);
     struct
     {
         uint32_t r0;
@@ -110,8 +109,6 @@ void HardFault_Handler(void)
  */
 void MemManage_Handler(void)
 {
-    LedsOff();
-    LedOn(LED3);
     /* Go to infinite loop when Memory Manage exception occurs */
     while (1)
     {
@@ -125,8 +122,6 @@ void MemManage_Handler(void)
  */
 void BusFault_Handler(void)
 {
-    LedsOff();
-    LedOn(LED3);
     /* Go to infinite loop when Bus Fault exception occurs */
     while (1)
     {
@@ -140,8 +135,6 @@ void BusFault_Handler(void)
  */
 void UsageFault_Handler(void)
 {
-    LedsOff();
-    LedOn(LED3);
     /* Go to infinite loop when Usage Fault exception occurs */
     while (1)
     {
@@ -200,7 +193,6 @@ void SysTick_Handler(void)
  */
 void EXTI0_IRQHandler(void)
 {
-    LedOn(LED3);
     if ((EXTI_GetITStatus(USER_BUTTON_EXTI_LINE) == SET) && (STM_EVAL_PBGetState(BUTTON_USER) != RESET))
     {
         /* Delay */

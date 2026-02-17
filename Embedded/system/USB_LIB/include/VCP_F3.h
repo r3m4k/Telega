@@ -43,11 +43,13 @@ extern __IO uint8_t Receive_Buffer[64];
 #ifdef __cplusplus
 extern "C" {
 #endif
+
 void VCP_Init(void);
 void VCP_ResetPort(void);
 void VCP_PutStr(char *str);
 void VCP_GetStr(char str[]);
 void VCP_Polling();
+
 #ifdef __cplusplus
 }
 #endif

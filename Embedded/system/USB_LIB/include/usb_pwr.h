@@ -30,6 +30,8 @@
 #define __USB_PWR_H
 
 /* Includes ------------------------------------------------------------------*/
+#include "usb_core.h"
+
 /* Exported types ------------------------------------------------------------*/
 typedef enum _RESUME_STATE
 {

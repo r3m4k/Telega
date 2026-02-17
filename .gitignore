@@ -8,3 +8,5 @@ KiCad/Telega_KiCad-backups/
 
 # Embedded ignore
 Embedded/archive/
+
+Embedded/Debug_Win/

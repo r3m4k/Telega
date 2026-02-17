@@ -257,6 +257,15 @@ extern "C"
  * @}
  */
 
+/**
+ * @defgroup Acc_Sensitivity
+ * @{
+ */
+#define LSM303DLHC_ACC_SENSITIVITY_2G     (float)     1.0f            /*!< accelerometer sensitivity with 2 g full scale [LSB/mg] */
+#define LSM303DLHC_ACC_SENSITIVITY_4G     (float)     0.5f            /*!< accelerometer sensitivity with 4 g full scale [LSB/mg] */
+#define LSM303DLHC_ACC_SENSITIVITY_8G     (float)     0.25f           /*!< accelerometer sensitivity with 8 g full scale [LSB/mg] */
+#define LSM303DLHC_ACC_SENSITIVITY_16G    (float)     0.0834f         /*!< accelerometer sensitivity with 12 g full scale [LSB/mg] */
+
 /** @defgroup Acc_High_Resolution
  * @{
  */

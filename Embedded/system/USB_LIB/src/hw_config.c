@@ -63,7 +63,7 @@ extern __IO uint8_t Send_Buffer[VIRTUAL_COM_PORT_DATA_SIZE];
 extern __IO uint32_t packet_receive;
 extern __IO uint8_t Receive_length;
 
-uint8_t Receive_Buffer[64] = {0};
+__IO uint8_t Receive_Buffer[64] = {0};
 uint32_t Send_length;
 
 __IO uint32_t packet_sent;

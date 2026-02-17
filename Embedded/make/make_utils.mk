@@ -54,7 +54,7 @@ __create_subdirs: __create_bin_dir
 	$(foreach dir, ${SUBDIRS_OBJ}, $(call ensure_dir,$(dir)))
 
 __create_bin_dir:
-	$(call ensure_dir,Debug_Win)
+	$(call ensure_dir,${BIN_PLACE})
 
 
 # --------------------------------

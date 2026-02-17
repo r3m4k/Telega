@@ -88,17 +88,24 @@
  extern "C" {
 #endif 
 
+// Инициализация оборудования
 void InitAll();
-void UserEP3_OUT_Callback(uint8_t *buffer);
 
+// Функции для отработки поступивших команд
+void UserEP3_OUT_Callback(uint8_t *buffer);
 void restart(void);
 void start_InitialSetting(void);
 void start_Measuring(void);
 void stop_Measuring(void);
 void stop_CollectingData(void);
+
+// Отправка предопределённых сообщений
+void send_confirm_msg(void);
 void send_hello_msg(void);
 void send_error_msg(void);
+void send_end_of_initial_setting_msg(void);
 
+// Системные функции
 void Delay(__IO uint32_t nTime);
 void TimingDelay_Decrement(void);
 
