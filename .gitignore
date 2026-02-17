@@ -1,10 +1,10 @@
-
+# KiCad ignore 
+KiCad/Telega_KiCad-backups/
 KiCad/Telega_KiCad-backups/
 
-
+# Python ignore
 .idea/
-
 *.pyc
 
-
-KiCad/Telega_KiCad-backups/
+# Embedded ignore
+Embedded/archive/
