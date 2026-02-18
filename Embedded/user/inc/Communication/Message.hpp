@@ -2,7 +2,7 @@
  * @file    Message.hpp
  * @author  Романовский Роман
  * @brief   Класс для работы с сообщениями фиксированной длины.
- * @details Предоставляет контейнер для хранения массива байт размером MessageLength.
+ * @details Предоставляет контейнер для хранения массива байт размером MaxMessageLength.
  *          Поддерживает создание из буфера, сравнение и сброс.
  *************************************************************************** */
 
@@ -16,11 +16,11 @@
 
 /* Defines -------------------------------------------------------------------*/
 /**
- * @def     MessageLength
+ * @def     MaxMessageLength
  * @brief   Максимальная длина сообщения в байтах (должна совпадать с размером
  *          буфера, используемого в hw_config.c).
  */
-#define MessageLength      64
+#define MaxMessageLength      64
 
 /* Global variables ----------------------------------------------------------*/
 
@@ -28,17 +28,15 @@
 namespace STM_CppLib{
 
     /**
-     * @brief   Класс для описания сообщений длиной до MessageLength байт.
+     * @brief   Класс для описания сообщений длиной до MaxMessageLength байт.
      * @details Содержит массив байт фиксированного размера, который инициализируется
      *          нулями при создании. Предоставляет конструкторы, оператор сравнения
      *          и метод очистки.
      */
     class Message{
     public:
-        /**
-         * @brief   Массив для хранения данных сообщения.
-         */
-        uint8_t bytes_msg[MessageLength] = {};
+        uint8_t bytes_msg[MaxMessageLength] = {};   ///< Массив для хранения данных сообщения
+        uint8_t msg_size = 0;                       ///< Реальный размер данных в сообщении
 
         /**
          * @brief   Конструктор по умолчанию.
@@ -48,35 +46,47 @@ namespace STM_CppLib{
         /**
          * @brief   Конструктор, копирующий данные из внешнего буфера.
          * @param   buffer   Указатель на источник данных.
-         * @param   size     Количество байт для копирования (не более MessageLength).
-         *                   По умолчанию копируется MessageLength байт.
-         * @warning Если size превышает MessageLength, произойдёт переполнение буфера.
+         * @param   size     Количество байт для копирования (не более MaxMessageLength).
+         *                   По умолчанию копируется MaxMessageLength байт.
          */
-        Message(const uint8_t *buffer, uint8_t size = MessageLength){
-            if (size > MessageLength) size = MessageLength;
+        Message(const uint8_t *buffer, uint8_t size = MaxMessageLength){
+            if (size > MaxMessageLength) size = MaxMessageLength;
+            msg_size = size;
             memcpy(bytes_msg, buffer, size);
         }
 
         /**
-         * @brief   Деструктор.
+         * @brief   Деструктор по умолчанию.
          */
         ~Message() = default;
 
         /**
+         * @brief   Оператор копирования.
+         * @param   other   Ссылка на другое сообщение.
+         */
+        Message& operator=(const Message& other) const {
+            if (this != &other) {
+                msg_size = other.msg_size;
+                memcpy(bytes_msg, other.bytes_msg, msg_size);
+            }
+            return *this;
+        }
+
+        /**
          * @brief   Оператор сравнения двух сообщений.
          * @param   other   Ссылка на другое сообщение.
-         * @return  Результат memcmp: 0, если сообщения полностью идентичны;
-         *          ненулевое значение в противном случае.
          */
-        bool operator==(Message& other){
-            return memcmp(bytes_msg, other.bytes_msg, MessageLength) == 0;
+        bool operator==(const Message& other) const {
+            if (msg_size != other.msg_size) return false;
+            return memcmp(bytes_msg, other.bytes_msg, msg_size) == 0;
         }
 
         /**
          * @brief   Очистка сообщения – заполняет весь массив нулями.
          */
         void clear() {
-            memset(bytes_msg, 0, MessageLength);
+            memset(bytes_msg, 0, MaxMessageLength);
+            msg_size = 0;
         }
     };
 

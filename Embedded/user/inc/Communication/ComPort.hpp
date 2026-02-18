@@ -98,7 +98,7 @@ namespace STM_CppLib{
          * @param   message   Ссылка на объект Message, содержащий массив байт.
          */
         void SendMessage(Message& message){
-            CDC_Send_DATA(message.bytes_msg, MessageLength);
+            CDC_Send_DATA(message.bytes_msg, message.msg_size);
         }
 
         /**

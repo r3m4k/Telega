@@ -106,6 +106,7 @@ void send_error_msg(void);
 void send_end_of_initial_setting_msg(void);
 
 // Системные функции
+void Error_Handler(void);
 void Delay(__IO uint32_t nTime);
 void TimingDelay_Decrement(void);
 

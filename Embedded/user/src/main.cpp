@@ -46,8 +46,9 @@ typedef void
 extern pHandler __isr_vectors[];
 
 // ----------------------------------------------------------------------------
-#define IST_VECTORS_NUM     98
-#define InitFrameNum        256
+#define IST_VECTORS_NUM     98      // Количество векторов прерываний
+#define InitFrameNum        256     // Количество пакетов для выставки
+#define MessageLen          8       // Длина информационных сообщений
  
 
 // Собственная таблица прерываний
@@ -183,8 +184,12 @@ int main()
         case ProgramStages::FooStage:
             if (previous_stage != ProgramStages::FooStage){
                 previous_stage = ProgramStages::FooStage;
+                // Выключим все таймеры
+                timer3.Stop();
+                timer3.ResetCounter();
                 timer4.Stop();
                 timer4.ResetCounter();
+                // Включим все светодиоды
                 leds.LedsOn();
             }
 
@@ -322,6 +327,7 @@ int main()
 
 // -------------------------------------------------------------------------------
 // Инициализация оборудования
+// -------------------------------------------------------------------------------
 void InitAll(){
     leds.Init();
     leds.LedsOn();
@@ -341,7 +347,9 @@ void InitAll(){
 }
 
 // -------------------------------------------------------------------------------
-// Собственный callback для отработки поступления нового сообщения по com порту
+// Функции для отработки поступивших команд
+// -------------------------------------------------------------------------------
+
 void UserEP3_OUT_Callback(uint8_t *buffer){
     STM_CppLib::Message message(buffer);
     com_port.EP3_OUT_Callback(message);
@@ -368,10 +376,14 @@ void stop_CollectingData(){
     stage = ProgramStages::FooStage;
 }
 
+// -------------------------------------------------------------------------------
+// Отправка предопределённых сообщений
+// -------------------------------------------------------------------------------
+
 void send_confirm_msg(){
-    constexpr uint8_t ConfirmMessage[MessageLength] = {0x7e, 0xe7, 0xff, 0xaa, 0xaa, 0xb8, 0};
-    STM_CppLib::Message message(ConfirmMessage);
-    com_port.SendMessage(message);
+    constexpr uint8_t ConfirmMessage[MessageLen] = {0x7e, 0xe7, 0xff, 0xaa, 0xaa, 0xb8, 0};
+    STM_CppLib::Message message(ConfirmMessage, MessageLen);
+    com_port.SendMessage(message);   // В таком случае передаём lvalue ссылку
 }
 
 void send_hello_msg(){
@@ -381,17 +393,19 @@ void send_hello_msg(){
 }
 
 void send_error_msg(){
-    constexpr uint8_t ErrorMessage[MessageLength] = {0x7e, 0xe7, 0xff, 0xff, 0xff, 0x62, 0};
-    STM_CppLib::Message message(ErrorMessage);
-    com_port.SendMessage(message);   // В таком случае передаём lvalue ссылку
-}
-
-void send_end_of_initial_setting_msg(){
-    constexpr uint8_t EndOfInitialSettingMessage[MessageLength] = {0x7e, 0xe7, 0xff, 0xba, 0xab, 0xc9, 0};
-    STM_CppLib::Message message(EndOfInitialSettingMessage);
+    constexpr uint8_t ErrorMessage[MessageLen] = {0x7e, 0xe7, 0xff, 0xff, 0xff, 0x62, 0};
+    STM_CppLib::Message message(ErrorMessage, MessageLen);
     com_port.SendMessage(message);
 }
 
+void send_end_of_initial_setting_msg(){
+    constexpr uint8_t EndOfInitialSettingMessage[MessageLen] = {0x7e, 0xe7, 0xff, 0xba, 0xab, 0xc9, 0};
+    STM_CppLib::Message message(EndOfInitialSettingMessage, MessageLen);
+    com_port.SendMessage(message);
+}
+
+// -------------------------------------------------------------------------------
+// Системные функции
 // -------------------------------------------------------------------------------
 
 void Error_Handler(void)

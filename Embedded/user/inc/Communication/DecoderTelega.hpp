@@ -78,8 +78,10 @@ public:
      *          передаёт каждый байт методу byte_processing().
      */
     void message_processing(const STM_CppLib::Message& message){
+        // Скопируем сообщений для безопасности и 
+        // для возможности его использования в других методах
         current_message = message;
-        for (uint8_t i = 0; i < MessageLength; i++){
+        for (uint8_t i = 0; i < MaxMessageLength; i++){
             byte_processing(current_message.bytes_msg[i]);
         }
     }
