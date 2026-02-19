@@ -64,7 +64,7 @@ namespace STM_CppLib{
          * @brief   Оператор копирования.
          * @param   other   Ссылка на другое сообщение.
          */
-        Message& operator=(const Message& other) const {
+        Message& operator=(const Message& other) {
             if (this != &other) {
                 msg_size = other.msg_size;
                 memcpy(bytes_msg, other.bytes_msg, msg_size);
