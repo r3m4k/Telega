@@ -1,0 +1,17 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "cortex-debug",
+            "name": "openocd_Win",
+            "cwd": "${config:myProject.openOCD_scripts_dir}",
+            "executable": "${config:myProject.project_dir}/Debug_Win/${config:myProject.project_name}.elf",
+            "servertype": "openocd",
+            "request": "launch",
+            "configFiles": [
+                "${config:myProject.stm32f3discovery_cfg_path}"
+            ],
+            "svdFile":"${workspaceFolder}/STM32F303.svd",
+        }
+    ]
+}
