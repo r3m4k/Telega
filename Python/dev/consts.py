@@ -8,7 +8,7 @@ from typing import NamedTuple
 # Рабочая директория
 # -------------------------------
 if os.name == 'nt':  # sys.platform == 'win32':
-    CWD = "D:/Job/Telega"
+    CWD = "D:/Job/Telega/Python"
 elif os.name == 'posix':
     CWD = os.getcwd()
 else:
