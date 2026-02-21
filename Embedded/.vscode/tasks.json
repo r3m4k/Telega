@@ -1,0 +1,101 @@
+{
+    
+    "version": "2.0.0",
+
+    "tasks": [
+        {
+            "type": "cppbuild",
+            "label": "Полная пересборка проекта",
+            "command": "make",
+            "args": [
+                "-C",
+                "${workspaceFolder}\\make",
+                "-f",
+                "Makefile.mk",
+                "rebuild_all",
+                "SYSTEM=windows",
+                "PROGRAM_NAME=${config:myProject.project_name}"
+            ],
+            "options": {
+                "cwd": "${fileDirname}"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "detail": "rebuild_all"
+        },
+
+        {
+            "type": "cppbuild",
+            "label": "Пересборка файлов пользователя и линковка проекта",
+            "command": "mingw32-make",
+            "args": [
+                "-C",
+                "${workspaceFolder}\\make",
+                "-f",
+                "Makefile.mk",
+                "rebuild_user",
+                "SYSTEM=windows",
+                "PROGRAM_NAME=${config:myProject.project_name}"
+            ],
+            "options": {
+                "cwd": "${fileDirname}"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "detail": "rebuild_user"
+        },
+
+        {
+            "type": "cppbuild",
+            "label": "Cборка файлов пользователя и линковка проекта",
+            "command": "mingw32-make",
+            "args": [
+                "-C",
+                "${workspaceFolder}\\make",
+                "-f",
+                "Makefile.mk",
+                "build_user",
+                "SYSTEM=windows",
+                "PROGRAM_NAME=${config:myProject.project_name}"
+            ],
+            "options": {
+                "cwd": "${fileDirname}"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "detail": "build_user"
+        },
+
+        {
+            "type": "shell",
+            "label": "Загрузить программу через OPENOCD",
+            "command": "${config:myProject.openOCD_exe} -f ${config:myProject.stm32f3discovery_cfg_path} -c 'program ${config:myProject.project_dir}/Debug_Win/${config:myProject.project_name}.elf verify reset exit'",
+            "isBackground": true,
+            "options": {
+                "cwd": "${config:myProject.openOCD_scripts_dir}"
+            },
+            "problemMatcher": [],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "detail": "Для stm32f3"
+        },
+
+    ]
+}
