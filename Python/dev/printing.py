@@ -1,7 +1,9 @@
 from PyQt5.QtCore import QObject, pyqtSignal
 import logging
 
+from singleton import singleton
 
+@singleton
 class Printing(QObject):
     NewText_Signal = pyqtSignal(str)
     def __init__(self, logFilePath=''):

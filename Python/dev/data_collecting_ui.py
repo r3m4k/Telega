@@ -82,8 +82,8 @@ class DataCollectingWindow(QMainWindow):
         #-------------------
         # Создадим нужные экземпляры классов
         self.printer = Printing()
-        self.STM_ComPort = STM_ComPort(self.printer)
-        self.GPS_ComPort = GPS_ComPort(self.printer)
+        self.STM_ComPort = STM_ComPort()
+        self.GPS_ComPort = GPS_ComPort()
 
         self.init_UI()
 

@@ -35,9 +35,9 @@ class COM_Port_GUI(QObject):
     NewData_Signal = pyqtSignal(dict)
     Error_ComPort = pyqtSignal(dict)
 
-    def __init__(self, printer: Printing, type_port: str):
+    def __init__(self, type_port: str):
         super().__init__()
-        self.printer = printer              # Объект, с помощью которого будем выводить информацию в GUI, stdout и logger
+        self.printer = Printing()           # Объект, с помощью которого будем выводить информацию в GUI, stdout и logger
         self.type_port = type_port          # Тип подключённого датчика по данному порту: STM или GPS
         self.processingFlag = False         # Флаг необходимости анализировать данные. Равен True после self.startMeasuring
                                             # И равен False после self.stopMeasuring
@@ -175,8 +175,8 @@ class STM_ComPort(COM_Port_GUI):
     """
     EndOfInitialSettings = pyqtSignal()
 
-    def __init__(self, printer: Printing):
-        super().__init__(printer, "STM")
+    def __init__(self):
+        super().__init__("STM")
 
     ##### Методы, напрямую вызываемые из GUI #####
     def startInitialSettings(self, com_port_name: str, saving_path: str, template_name: str):
@@ -237,8 +237,8 @@ class GPS_ComPort(COM_Port_GUI):
     EndOfCollectingCoordinates = pyqtSignal()
     DURATION_COORDINATES_COLLECTION = 5    # Время сбора координат в секундах
 
-    def __init__(self, printer: Printing):
-        super().__init__(printer, "GPS")
+    def __init__(self):
+        super().__init__("GPS")
         self.timerFlag = False
         self.coordCollecting = Thread()
         self.counter = 0

@@ -7,6 +7,7 @@ import binascii
 from multiprocessing import Queue
 
 # User imports
+from .decoding import TelegaData, TelegaDecoder
 
 
 ##########################################################
@@ -48,12 +49,22 @@ class Decoder:
         con_sum = 0         # Посчитанная контрольная сумма
         Con_Sum = 0         # Полученная контрольная сумма
 
+        decoder = TelegaDecoder()
+
         while True:
             if source_queue.empty():
                 continue
 
             bt = source_queue.get()
             duplicate_queue.put(bt)
+
+            decoder.byte_processing(bt)
+            if decoder.data_len == 1:
+                received_data: TelegaData = decoder.received_data.pop()
+                output_queue.put(received_data.to_dict())
+
+            continue
+
             try:
                 val = int(binascii.hexlify(bt), 16)
             except ValueError:
@@ -130,7 +141,6 @@ class Decoder:
                             if bytes_buffer == [0xba, 0xab]:
                                 msg_queue.put('Command__stop_InitialSetting')
                             break
-
 
                     else:
                         msg_queue.put('Warning__Контрольная сумма не сошлась')
