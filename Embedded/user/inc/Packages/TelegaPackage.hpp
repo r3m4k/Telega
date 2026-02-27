@@ -94,7 +94,7 @@ namespace STM_CppLib{
 
             // Последним байтом заголовка необходимо задать длину полезных данных:
             // sizeof(time) + 2*sizeof(TriaxialData) + sizeof(float)
-            package_body.header[3] = sizeof(uint16_t) + 2 * sizeof(TriaxialData) + sizeof(float);
+            package_body.header[3] = sizeof(package_body) - sizeof(package_body.header) - sizeof(package_body.control_sum);
             
             len = sizeof(package_body);                             ///< Общая длина пакета
             data_ptr = reinterpret_cast<uint8_t*>(&package_body);   ///< Указатель на начало пакета
