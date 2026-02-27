@@ -74,7 +74,7 @@ class TelegaDecoder:
         match self._stage:
             case Stage.WantHeader:
                 if self._received_bytes[-2::] == self._header:
-                    self._stage = Stage.WantData
+                    self._stage = Stage.WantFormat
                     # Отчистим self._received_bytes от возможных прошлых записанных байтов
                     self._received_bytes = self._header.copy()
 
@@ -141,3 +141,5 @@ class TelegaDecoder:
         for b in data_bytes[:-1]:
             total += int.from_bytes(b, 'big')
         return bytes([total & 0xFF])
+
+

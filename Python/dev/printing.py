@@ -1,7 +1,7 @@
 from PyQt5.QtCore import QObject, pyqtSignal
 import logging
 
-from singleton import singleton
+from dev.singleton import singleton
 
 @singleton
 class Printing(QObject):

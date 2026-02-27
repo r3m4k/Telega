@@ -52,5 +52,5 @@ class TelegaData(NamedTuple):
 class TelegaDataIndexes:
     time_index = 4
     acc_index = 8
-    gyro_index = 12
-    temp_index = 16
+    gyro_index = 20
+    temp_index = 32

@@ -10,6 +10,7 @@ __author__ = 'Roman Romanovskiy'
 from .decoder_protocol import DecoderProtocol
 from .data_description import TelegaData, TriaxialData
 from .telega_decoder import TelegaDecoder
+from .command import Command
 
 # --------------------------------------------------------
 
@@ -17,7 +18,8 @@ __all__ = [
     'DecoderProtocol',
     'TelegaDecoder',
     'TelegaData',
-    'TriaxialData'
+    'TriaxialData',
+    'Command'
 ]
 
 # --------------------------------------------------------

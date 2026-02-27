@@ -7,7 +7,7 @@ import binascii
 from multiprocessing import Queue
 
 # User imports
-from .decoding import TelegaData, TelegaDecoder
+from .decoding import TelegaData, TelegaDecoder, Command
 
 
 ##########################################################
@@ -36,19 +36,8 @@ class Decoder:
         except Exception as error:
             msg_queue.put(f'Critical__type_name = {type_name}\n{error}\n{traceback.format_exc()}')
 
-    def decoding_STM(self, source_queue: Queue, output_queue: Queue, duplicate_queue: Queue, msg_queue: Queue):
-        stages = self.STM_Stages    # Создадим новую переменную с перечислением self.STM_Stages для краткости дальнейшего кода
-        stage = stages.Want7E
-        titles = ['Time', 'Acc_X', 'Acc_Y', 'Acc_Z', 'Gyro_X', 'Gyro_Y', 'Gyro_Z', 'Temp']
-        package_type: str = ''
-
-        bytes_buffer = []   # Буфер для байтов, прочитанных из очереди данных
-        data = {}           # Словарь, в который сохраним пакет полученных данных, с ключами titles
-        size = 0            # Количество байтов данных в посылке
-        index = 0           # Индекс байта в пакете данных
-        con_sum = 0         # Посчитанная контрольная сумма
-        Con_Sum = 0         # Полученная контрольная сумма
-
+    @staticmethod
+    def decoding_STM(source_queue: Queue, output_queue: Queue, duplicate_queue: Queue, msg_queue: Queue):
         decoder = TelegaDecoder()
 
         while True:
@@ -58,93 +47,19 @@ class Decoder:
             bt = source_queue.get()
             duplicate_queue.put(bt)
 
+            # print(bt)
             decoder.byte_processing(bt)
+
+            if len(decoder.input_command):
+                command: Command = decoder.input_command.pop()
+                match command.byte_coding:
+                    case [0xba, 0xab]:
+                        print('Command__stop_InitialSetting')
+                        msg_queue.put('Command__stop_InitialSetting')
+
             if decoder.data_len == 1:
                 received_data: TelegaData = decoder.received_data.pop()
                 output_queue.put(received_data.to_dict())
-
-            continue
-
-            try:
-                val = int(binascii.hexlify(bt), 16)
-            except ValueError:
-                # msg_queue.put(f'Warning__{traceback.format_exc()}')
-                continue
-
-            match stage:
-                case stages.Want7E:
-                    if val == 126:
-                        stage = stages.WantE7
-                        con_sum = val
-                        # Обнулим накопленные значения
-                        index = 0
-                        data = {}
-                        bytes_buffer = []
-                    else:
-                        stage = stages.Want7E
-
-                case stages.WantE7:
-                    if val == 231:
-                        stage = stages.WantFormat
-                        con_sum += val
-                    else:
-                        stage = stages.Want7E
-
-                case stages.WantFormat:
-                    package_format = val
-                    con_sum += val
-
-                    if package_format == 0xff:      # Формат команды из двух байтов
-                        package_type = 'Command'
-                        size = 2
-                        stage = stages.WantPacketBody
-
-                    elif package_format == 0xC8:    # Формат пакета данных
-                        package_type = 'Data'
-                        stage = stages.WantSize
-
-                case stages.WantSize:
-                    size = val
-                    con_sum += val
-                    stage = stages.WantPacketBody
-
-                case stages.WantPacketBody:
-
-                    if index < size:
-                        index += 1
-                        con_sum += val
-                        bytes_buffer.append(val)
-
-                    if index == size:
-                        stage = stages.WantConSum
-
-                case stages.WantConSum:
-                    Con_Sum = val
-                    # Сравним Con_Sum и младшие 8 бит con_sum
-                    if Con_Sum == (con_sum & 255):
-                        if package_type == 'Data':
-                            for i in range(size // 2):
-                                # Сохраним полученные данные, полученные в LittleEndianMode в словарь
-                                value = self.mod_code(bytes_buffer[2 * i], bytes_buffer[2 * i + 1])
-                                if i == 0:
-                                    # Для Time
-                                    data[titles[i]] = round(value * 0.25, 3)
-                                elif i in range(1, size // 2 - 1):
-                                    # Для Acc_XYZ и Gyro_XYZ
-                                    data[titles[i]] = value / 1000
-                                elif i == (size // 2) - 1:
-                                    # Для Temp
-                                    data[titles[i]] = value / 100
-                            output_queue.put(data)
-
-                        elif package_type == 'Command':
-                            if bytes_buffer == [0xba, 0xab]:
-                                msg_queue.put('Command__stop_InitialSetting')
-                            break
-
-                    else:
-                        msg_queue.put('Warning__Контрольная сумма не сошлась')
-                    stage = stages.Want7E
 
     @staticmethod
     def mod_code(low_bit, high_bit):
