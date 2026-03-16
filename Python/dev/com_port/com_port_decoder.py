@@ -7,7 +7,7 @@ import binascii
 from multiprocessing import Queue
 
 # User imports
-from .decoding import TelegaData, TelegaDecoder, Command
+from dev.decoding import TelegaData, TelegaDecoder, Command
 
 
 ##########################################################

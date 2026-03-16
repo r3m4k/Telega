@@ -11,17 +11,15 @@ class Matrix:
     # -------------------------------
     # Математические операторы
     # -------------------------------
-    def __mul__(self, multiplier):
+    def __mul__(self, other):
         from .vector_3d import Vector
 
-        if isinstance(multiplier, Matrix):
-            self._matrix = np.dot(self._matrix, multiplier._matrix)
-            return None
+        if isinstance(other, Matrix):
+            return Matrix(np.dot(self._matrix, other._matrix))
 
-        elif isinstance(multiplier, Vector):
-            return Vector(
-                list(self._matrix @ np.array(multiplier.to_list()))
-            )
+        elif isinstance(other, Vector):
+        # лучше вынести в отдельный метод или использовать __matmul__
+            return Vector(np.dot(self._matrix, other.to_list()))
         else:
             raise ValueError('In-place multiplication for Matrix is only supported with Matrix')
 

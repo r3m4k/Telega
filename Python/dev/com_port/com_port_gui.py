@@ -12,7 +12,7 @@ from PyQt5.QtCore import QObject, pyqtSignal
 # User imports
 from .proxy import MyManager, COM_PortProxy, DecodeProxy
 from .com_port import COM_Port
-from .decoder import Decoder
+from .com_port_decoder import Decoder
 from dev.printing import Printing
 from dev.consts import BAUDRATE
 

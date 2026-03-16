@@ -10,7 +10,7 @@ __author__ = 'Roman Romanovskiy'
 
 from .utils import get_ComPorts
 
-from .decoder import (
+from .com_port_decoder import (
     Decoder
 )
 

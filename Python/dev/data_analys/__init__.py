@@ -17,7 +17,7 @@ from .utils import (
     create_dir
 )
 
-from .rotation_analys import (
+from dev.data_analys.rotation_analys import (
     RotatingFrameAnalyzer,
     Vector,
     Matrix

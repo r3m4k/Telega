@@ -1,5 +1,5 @@
-from dev.com_port.decoding.telega_decoder import TelegaDecoder
-from dev.com_port.decoding.package_examples import package_1, package_2, package_3, package_4
+from dev.decoding.telega_decoder import TelegaDecoder
+from dev.decoding import package_1, package_2
 
 #########################################
 

@@ -12,7 +12,7 @@ import numpy as np
 from .utils import *
 from .decoding import Decoder
 from .filtering import Filter
-from .rotation_analys import RotatingFrameAnalyzer
+from dev.data_analys.rotation_analys import RotatingFrameAnalyzer
 from dev.consts import Moscow_coordinates, color_scheme
 from dev.plotting import CanvasConfig, Plotter
 
