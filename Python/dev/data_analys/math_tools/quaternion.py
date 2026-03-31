@@ -10,31 +10,26 @@ from dev.data_analys.math_tools.vector_3d import Vector
 
 class Quaternion:
     """
-    Единичный кватернион, представляющий вращение в трёхмерном пространстве.
-
-    Кватернион хранится в виде (w, x, y, z), где w — скалярная часть.
-    Все кватернионы автоматически нормализуются до единичной длины.
+    Класс для использования кватернионов.
     """
 
     def __init__(self, w: float = 1.0, x: float = 0.0, y: float = 0.0, z: float = 0.0):
         """
-        Инициализация кватерниона с заданными компонентами и нормализация.
+        Инициализация кватерниона с заданными компонентами и последующая нормализация.
         """
         self.w = w
         self.x = x
         self.y = y
         self.z = z
-        self._normalize()
 
-    def _normalize(self) -> None:
-        """Нормализация кватерниона до единичной длины."""
-        norm = np.sqrt(self.w**2 + self.x**2 + self.y**2 + self.z**2)
+    def normalize(self) -> None:
+        """Нормализация кватерниона."""
+        norm = self.norm
         if norm > 0:
-            inv_norm = 1.0 / norm
-            self.w *= inv_norm
-            self.x *= inv_norm
-            self.y *= inv_norm
-            self.z *= inv_norm
+            self.w /= norm
+            self.x /= norm
+            self.y /= norm
+            self.z /= norm
 
     @property
     def norm(self) -> float:
@@ -50,7 +45,9 @@ class Quaternion:
         return Quaternion(self.w, -self.x, -self.y, -self.z)
 
     def __mul__(self, other: 'Quaternion') -> 'Quaternion':
-        """Умножение кватернионов (self * other)."""
+        """
+        Умножение кватернионов (self * other).
+        """
         if not isinstance(other, Quaternion):
             raise TypeError("Умножение определено только между кватернионами")
         return Quaternion(
@@ -60,41 +57,30 @@ class Quaternion:
             self.w * other.z + self.x * other.y - self.y * other.x + self.z * other.w
         )
 
-    def rotate_vector(self, v):
+    def rotate_vector(self, vec: Vector) -> Vector:
         """
-        Поворачивает трёхмерный вектор с помощью кватерниона.
+        Поворачивает вектор v с помощью кватерниона.
 
         Аргументы:
-            v: либо numpy массив формы (3,), либо объект Vector (с методом to_list()).
+            v: объект Vector.
 
         Возвращает:
-            Повёрнутый вектор в том же типе, что и входной (numpy массив или Vector).
+            Повёрнутый вектор (объект Vector).
         """
-        # Определяем тип входных данных и преобразуем в numpy массив
-        if isinstance(v, np.ndarray) and v.shape == (3,):
-            input_type = 'numpy'
-            vec = v
-        elif isinstance(v, Vector):
-            input_type = 'vector'
-            vec = np.array(v.to_list())
-        else:
-            raise TypeError("v должен быть numpy массивом формы (3,) или объектом Vector")
+        if not isinstance(vec, Vector):
+            TypeError("Поворот с помощью кватерниона определён только для типа Vector")
 
-        # Поворот через умножение кватернионов
-        # Представляем вектор как чистый кватернион (0, vec)
+        self.normalize()    # Нормируем кватернион
+
+        # Реализуем поворот вектора
         p = Quaternion(0, vec[0], vec[1], vec[2])
         rotated = self * p * self.conjugate()
-        result_np = np.array([rotated.x, rotated.y, rotated.z])
 
-        # Возвращаем в том же типе, что и входной
-        if input_type == 'numpy':
-            return result_np
-        else:
-            return Vector(result_np.tolist())
+        return Vector([rotated.x, rotated.y, rotated.z])
 
     def to_matrix(self) -> np.ndarray:
         """
-        Преобразует кватернион в матрицу поворота 3x3.
+        Преобразует кватернион в матрицу поворота 3x3 (numpy-массив).
         """
         w, x, y, z = self.w, self.x, self.y, self.z
         return np.array([
@@ -104,24 +90,19 @@ class Quaternion:
         ])
 
     @classmethod
-    def from_axis_angle(cls, axis, angle: float) -> 'Quaternion':
+    def from_axis_angle(cls, axis: Vector, angle: float) -> 'Quaternion':
         """
         Создаёт кватернион из оси вращения и угла.
 
         Аргументы:
-            axis: либо numpy массив формы (3,), либо объект Vector, представляющий ось (будет нормализована).
+            axis: объект Vector, представляющий ось.
             angle: угол поворота в радианах.
 
         Возвращает:
             Объект Quaternion.
         """
-        if isinstance(axis, np.ndarray) and axis.shape == (3,):
-            axis_np = axis
-        elif isinstance(axis, Vector):
-            axis_np = np.array(axis.to_list())
-        else:
-            raise TypeError("axis должен быть numpy массивом формы (3,) или объектом Vector")
-
+        # Преобразуем ось в numpy-массив
+        axis_np = np.array(axis.to_list())
         axis_np = axis_np / np.linalg.norm(axis_np)
         half_angle = angle * 0.5
         sin_half = np.sin(half_angle)
@@ -133,29 +114,19 @@ class Quaternion:
         )
 
     @classmethod
-    def from_gyro(cls, gyro, dt: float) -> 'Quaternion':
+    def from_gyro(cls, gyro: Vector, dt: float) -> 'Quaternion':
         """
         Создаёт инкрементальный кватернион поворота из вектора угловой скорости.
 
         Аргументы:
-            gyro: либо numpy массив формы (3,), либо объект Vector, представляющий угловую скорость (рад/с).
+            gyro: объект Vector, представляющий угловую скорость (рад/с).
             dt: шаг по времени в секундах.
 
         Возвращает:
             Кватернион, соответствующий повороту за время dt (в предположении постоянной угловой скорости).
         """
-        if isinstance(gyro, np.ndarray) and gyro.shape == (3,):
-            gyro_np = gyro
-        elif isinstance(gyro, Vector):
-            gyro_np = np.array(gyro.to_list())
-        else:
-            raise TypeError("gyro должен быть numpy массивом формы (3,) или объектом Vector")
-
-        omega = np.linalg.norm(gyro_np)
-        if omega < 1e-12:
-            return cls(1.0, 0.0, 0.0, 0.0)
-
-        axis = gyro_np / omega
+        omega = gyro.norm
+        axis = gyro / omega
         angle = omega * dt
         return cls.from_axis_angle(axis, angle)
 

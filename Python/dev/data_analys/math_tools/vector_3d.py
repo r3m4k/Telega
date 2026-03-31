@@ -89,6 +89,24 @@ class Vector:
 
         return self
 
+    def __truediv__(self, divisor):
+        """
+        Реализует истинное деление вектора на скаляр (/).
+        """
+        try:
+            _divisor = float(divisor)
+        except ValueError:
+            raise ValueError('The divisor cannot be converted to the float type')
+
+        if _divisor == 0:
+            raise ZeroDivisionError('Division by zero')
+
+        return Vector([
+            self._X_coord / _divisor,
+            self._Y_coord / _divisor,
+            self._Z_coord / _divisor
+        ])
+
     # -------------------------------
     # Работа с коллекциями
     # -------------------------------
