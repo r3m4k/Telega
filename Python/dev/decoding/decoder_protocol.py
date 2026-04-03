@@ -15,7 +15,7 @@ class DecoderProtocol(Protocol[T]):
     Протокол, описывающий любой декодер, который принимает байты
     и накапливает декодированные объекты типа T.
     """
-    received_data: list[T]
+    received_data: T
 
     @property
     def data_len(self) -> int: ...
