@@ -432,13 +432,13 @@ void send_confirm_msg(){
 }
 
 void send_handshake_ack(){
-    const char* text = "IMU_STM32_ACK";
+    const char* text = "TELEGA_STM32_ACK";
     Packages::MessagePackage msg_package(text, strlen(text));
     com_port.SendPackage(msg_package);
 }
 
 void send_heartbeat_ack(){
-    const char* text = "IMU_STM32_ALIVE";
+    const char* text = "TELEGA_STM32_ALIVE";
     Packages::MessagePackage msg_package(text, strlen(text));
     com_port.SendPackage(msg_package);
 }
