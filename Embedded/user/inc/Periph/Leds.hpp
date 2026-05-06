@@ -18,11 +18,11 @@ namespace STM_CppLib{
     // Класс для управления светодиодами на плате
     class Leds{
         // Байт, в котором будем побитово хранить информацию о состоянии светодиода (вкл/выкл)
-        uint8_t leds_status;
+        uint8_t leds_status = 0;
 
     public:
-        Leds(): leds_status(0x00) {}
-        ~Leds(){}
+        Leds() = default;
+        ~Leds() = default;
 
         void Init(){
             STM_EVAL_LEDInit(LED4);

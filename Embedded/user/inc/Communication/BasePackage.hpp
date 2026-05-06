@@ -1,6 +1,6 @@
 /* Define to prevent recursive inclusion -------------------------------------*/
-#ifndef __BASE_PACKAGE_HPP
-#define __BASE_PACKAGE_HPP
+#ifndef BASE_PACKAGE_HPP
+#define BASE_PACKAGE_HPP
 
 /* Includes ------------------------------------------------------------------*/
 #include <stdint.h>
@@ -10,8 +10,7 @@
 /* Global variables ----------------------------------------------------------*/
 
 // -----------------------------------------------------------------------------
-namespace STM_CppLib{
-    namespace STM_Packages{
+namespace Packages{
 
     // -------------------------------------------------------------------------
     /* Класс для описания базового пакета информации
@@ -22,20 +21,28 @@ namespace STM_CppLib{
     *  и len, которые необходимо определить в дочернем классе.
     *  ---------------------------------------------------------------------- */
     class BasePackage{
-        // virtual void DataPackaging() = 0;
-        // virtual uint8_t CountControlSum() = 0;
+    protected:
+        /**
+         * @brief   Первый байт заголовка пакета.
+         * @details Общий для всех пакетов, отправляемых устройством. Объявлен
+         *          как static constexpr поле базового класса — наследники
+         *          используют его без квалификации при формировании заголовка.
+         */
+        static constexpr uint8_t HeaderFirstByte  = 0x7E;
+
+        /**
+         * @brief   Второй байт заголовка пакета.
+         * @details См. HeaderFirstByte.
+         */
+        static constexpr uint8_t HeaderSecondByte = 0xE7;
 
     public:
         uint8_t *data_ptr;
         uint8_t len;
 
         BasePackage(): data_ptr(nullptr), len(0) {}
-        ~BasePackage(){};
-
-        // virtual void UpdateData() = 0;
-
+        ~BasePackage() = default;
     };
 
-    } // namespace STM_Packages
-} // namespace STM_CppLib
-#endif /*   __BASE_PACKAGE_HPP   */
+} // namespace Packages
+#endif /*   BASE_PACKAGE_HPP   */
