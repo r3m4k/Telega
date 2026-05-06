@@ -26,6 +26,7 @@ class ComPort(BytesSource):
         try:
             self._port = Serial(port=self._port_name, baudrate=self._baudrate)
             self._printing_func('✅ Успешно')
+            self._port.write(bytes([0x7e, 0xe7, 0xff, 0xbc, 0xcb, 0xeb]),)
         except Exception as err:
             self._printing_func('❌ Ошибка подключения. Подробная информация:')
             self._printing_func(err)
@@ -34,6 +35,7 @@ class ComPort(BytesSource):
     def cleanup(self):
         """ Завершение работы порта """
         try:
+            self._port.write(bytes([0x7e, 0xe7, 0xff, 0xcd, 0xdc, 0x0d]))
             self._port.close()
         except Exception:
             pass

@@ -10,7 +10,7 @@ import numpy as np
 # User imports
 from dev.decoding import DecoderProtocol, TelegaDecoder, TelegaData
 from byte_source import BytesSource, ReadError
-from byte_source.com_port import ComPortSetting
+from byte_source.com_port import ComPortSetting, ComPort
 from byte_source.file_source import FileSourceSetting
 from scripts.utils import confirm_from_console
 
@@ -33,19 +33,19 @@ save_dir.mkdir(parents=True, exist_ok=True)
 
 print('# -----------------------------------------')
 
-bytes_source: BytesSource
-bytes_source_num = int(input('Выберите тип источника данных:\n'
-                             '| 1. COM-порт\n'
-                             '| 2. Записанный log файл\n'
-                             '--> '))
-print()
-if bytes_source_num == 1:
-    bytes_source = ComPortSetting().get_bytes_source()
-elif bytes_source_num == 2:
-    bytes_source = FileSourceSetting().get_bytes_source()
-else:
-    print('❌ Ошибка ввода')
-    exit(1)
+bytes_source: BytesSource = ComPort('COM7', 115200)
+# bytes_source_num = int(input('Выберите тип источника данных:\n'
+#                              '| 1. COM-порт\n'
+#                              '| 2. Записанный log файл\n'
+#                              '--> '))
+# print()
+# if bytes_source_num == 1:
+#     bytes_source = ComPortSetting().get_bytes_source()
+# elif bytes_source_num == 2:
+#     bytes_source = FileSourceSetting().get_bytes_source()
+# else:
+#     print('❌ Ошибка ввода')
+#     exit(1)
 
 
 decoder: DecoderProtocol[list[TelegaData]] = TelegaDecoder()
