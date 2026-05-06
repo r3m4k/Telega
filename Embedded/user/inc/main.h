@@ -105,6 +105,7 @@ void MeasuringStage_execute();
 void UserEP3_OUT_Callback(uint8_t *buffer);
 void restart(void);
 void set_FooStage(void);
+void set_CalibrationStage(void);
 void set_StaticStage(void);
 void set_MeasureStage(void);
 

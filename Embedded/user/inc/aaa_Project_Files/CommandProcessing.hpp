@@ -62,7 +62,7 @@ namespace Commands{
     /**
      * @brief   Отложенная команда: переход в стадию CalibrationStage.
      */
-    inline ByteCommand Set_FooStage_Cmd({0xaa, 0x01}, set_CalibrationStage, ConfirmPolicy::Required);
+    inline ByteCommand Set_CalibrationStage_Cmd({0xaa, 0x01}, set_CalibrationStage, ConfirmPolicy::Required);
 
     /**
      * @brief   Отложенная команда: переход в стадию MeasuringStage.
