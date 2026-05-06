@@ -57,7 +57,12 @@ namespace Commands{
     /**
      * @brief   Отложенная команда: переход в стадию FooStage.
      */
-    inline ByteCommand Set_FooStage_Cmd({0xaa, 0x01}, set_FooStage, ConfirmPolicy::Required);
+    inline ByteCommand Set_FooStage_Cmd({0xaa, 0x00}, set_FooStage, ConfirmPolicy::Required);
+
+    /**
+     * @brief   Отложенная команда: переход в стадию CalibrationStage.
+     */
+    inline ByteCommand Set_FooStage_Cmd({0xaa, 0x01}, set_CalibrationStage, ConfirmPolicy::Required);
 
     /**
      * @brief   Отложенная команда: переход в стадию MeasuringStage.
@@ -65,7 +70,7 @@ namespace Commands{
     inline ByteCommand Set_MeasureStage_Cmd({0xaa, 0x02}, set_MeasureStage, ConfirmPolicy::Required);
 
     /**
-     * @brief   Отложенная команда: переход в стадию MeasuringStage.
+     * @brief   Отложенная команда: переход в стадию StaticStage.
      */
     inline ByteCommand Set_StaticInitStage_Cmd({0xaa, 0x03}, set_StaticStage, ConfirmPolicy::Required);
 

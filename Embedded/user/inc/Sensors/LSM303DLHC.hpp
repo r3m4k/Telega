@@ -65,7 +65,9 @@ namespace STM_CppLib{
         #ifdef USE_MAGNETIC_SENSOR
             MagInit();
         #endif /*   USE_MAGNETIC_SENSOR   */
+        }
 
+        void InitAccScaller(){
             // Вычислим масштабирующий коэффициент для ускорения
             SensorScaller<LSM303DLHC> acc_scaller{this, &acc_data, TrueMoscowAcc};
             acc_scaller.Init();

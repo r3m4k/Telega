@@ -94,6 +94,8 @@ void InitAll();
 // Функции для отработки стадий программы
 void FooStage_init();
 void FooStage_execute();
+void CalibrationStage_init();
+void CalibrationStage_execute();
 void StaticStage_init();
 void StaticStage_execute();
 void MeasuringStage_init();
