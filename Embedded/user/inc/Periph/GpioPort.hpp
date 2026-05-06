@@ -1,6 +1,15 @@
+/** ****************************************************************************
+ * @file    GpioPort.hpp
+ * @author  Романовский Роман
+ * @brief   Дескриптор порта GPIO
+ * @details Предоставляет шаблонный класс GPIO_PortDescriptor для получения
+ *          информации о конкретном порте GPIO на этапе компиляции:
+ *          указатель на структуру GPIO_TypeDef и константа для тактирования RCC.
+ **************************************************************************** */
+
 /* Define to prevent recursive inclusion -------------------------------------*/
-#ifndef __GPIO_PORT_HPP
-#define __GPIO_PORT_HPP
+#ifndef GPIO_PORT_HPP
+#define GPIO_PORT_HPP
 
 /* Includes ------------------------------------------------------------------*/
 #include "stm32f30x.h"
@@ -15,13 +24,26 @@
 namespace STM_CppLib{
     namespace STM_GPIO{
 
-        enum class GPIO_Port{
-            PortA, PortB, PortC, PortD, PortE, PortF
-        };
+        /**
+         * @brief   Перечисление доступных портов GPIO.
+         */
+        enum class GPIO_Port{ PortA, PortB, PortC, PortD, PortE, PortF };
 
+        /**
+         * @brief   Шаблонный дескриптор порта GPIO.
+         * @tparam  port  Порт GPIO (значение перечисления GPIO_Port).
+         * @details Позволяет получить на этапе компиляции указатель на структуру
+         *          GPIOx и соответствующую константу RCC для включения тактирования.
+         * @note    Используется в классе GPIO_Pin для доступа к аппаратным ресурсам.
+         */
         template<GPIO_Port port>
         class GPIO_PortDescriptor{
-        public:            
+        public:
+            /**
+             * @brief   Возвращает указатель на структуру GPIO_TypeDef для заданного порта.
+             * @return  Указатель на структуру GPIOx (например, GPIOA, GPIOB и т.д.).
+             * @note    Если порт не распознан, возвращает nullptr.
+             */
             static constexpr GPIO_TypeDef* get_GPIO_Type() {
                 switch(port) {
                     case GPIO_Port::PortA: return GPIOA;
@@ -34,6 +56,11 @@ namespace STM_CppLib{
                 }
             };
             
+            /**
+             * @brief   Константа для включения тактирования соответствующего порта.
+             * @details Значение предназначено для передачи в функцию RCC_AHBPeriphClockCmd.
+             * @note    Определяется через лямбда-выражение на этапе компиляции.
+             */
             static constexpr uint32_t RCC_Periph = []() -> uint32_t {
                 switch (port) {
                     case GPIO_Port::PortA: return RCC_AHBPeriph_GPIOA;
@@ -51,4 +78,4 @@ namespace STM_CppLib{
 
     } // namespace STM_GPIO
 } // namespace STM_CppLib
-#endif /*   __GPIO_PORT_HPP   */
+#endif /*   GPIO_PORT_HPP   */
