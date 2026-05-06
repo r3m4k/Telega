@@ -83,8 +83,8 @@ namespace STM_CppLib{
          * @details Выполняет сброс порта (VCP_ResetPort) и инициализацию VCP (VCP_Init).
          */
         void Init(){
-            VCP_Init();         // Инициализация VCP
             VCP_ResetPort();    // Подтягиваем ножку D+ к нулю для правильной идентификации
+            VCP_Init();         // Инициализация VCP
         }
 
         /**
