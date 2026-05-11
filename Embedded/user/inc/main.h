@@ -114,6 +114,7 @@ void send_confirm_msg(void);
 void send_handshake_ack(void);
 void send_heartbeat_ack(void);
 void send_error_msg(void);
+void send_end_of_calibration_msg(void);
 void send_end_of_static_init_msg(void);
 
 // Системные функции

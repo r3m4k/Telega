@@ -62,8 +62,9 @@ _user_pHandler _user_vector_table[IST_VECTORS_NUM] = {0};
 
 // ----------------------------------------------------------------------------
 
-// Необходимые счётчик и флаг
+// Необходимые счётчики и флаг
 uint32_t tick_counter = 0;
+int32_t dpp_code = 0;
 volatile bool timer_tick_flag = false;
 
 // Счётчик, необходимый для снижения частоты опроса температурного датчика
@@ -116,9 +117,9 @@ TriaxialData gyro_value;
 float temp_value;
 
 // Посылка данных
-// TODO: в дальнейшем, надо добавить датчик ДПП и пульт 
+// TODO: в дальнейшем, надо добавить пульт 
 Packages::TelegaPackage telega_package(
-    &tick_counter, &acc_value, &gyro_value, &temp_value
+    &tick_counter, &acc_value, &gyro_value, &temp_value, &dpp_code
 );
 
 /* ****************************************************************************
@@ -297,6 +298,9 @@ void CalibrationStage_execute(){
     // Запустим инициализацию масштабирующего коэффициента датчиков
     sensor_L3GD20.InitGyroScaller();
     sensor_LSM303DLHC.InitAccScaller();
+
+    send_end_of_calibration_msg();
+    program_stage_queue.put(&FooStage);
 }
 
 // -------------------------------------------------------------------------------
@@ -478,6 +482,12 @@ void send_heartbeat_ack(){
 
 void send_error_msg(){
     const char* text = "UNKNOWN_COMMAND";
+    Packages::MessagePackage msg_package(text, strlen(text));
+    com_port.SendPackage(msg_package);
+}
+
+void send_end_of_calibration_msg(){
+    const char* text = "END_OF_CALIBRATION";
     Packages::MessagePackage msg_package(text, strlen(text));
     com_port.SendPackage(msg_package);
 }

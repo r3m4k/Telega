@@ -41,6 +41,7 @@ namespace Packages{
         TriaxialData* acc_data_ptr;     ///< Указатель на внешние данные акселерометра
         TriaxialData* gyro_data_ptr;    ///< Указатель на внешние данные гироскопа
         float* temp_data_ptr;           ///< Указатель на внешнее значение температуры
+        int32_t* dpp_code_ptr;          ///< Указатель на внешнее значение кода ДПП
 
         /**
          * @brief   Внутренняя структура пакета (упакована без выравнивания).
@@ -62,6 +63,7 @@ namespace Packages{
             uint32_t time = 0;
             TriaxialData acc_data, gyro_data;
             float temp;
+            int32_t dpp_code;
             uint8_t control_sum = 0;
         } package_body;
         #pragma pack()
@@ -82,12 +84,17 @@ namespace Packages{
          * @param   _acc_data_ptr   Указатель на объект TriaxialData для акселерометра.
          * @param   _gyro_data_ptr  Указатель на объект TriaxialData для гироскопа.
          * @param   _temp_data_ptr  Указатель на float для температуры.
+         * @param   _dpp_code_ptr   Указатель на int32_t для кода ДПП.
          * @note    Переданные указатели должны оставаться валидными на всём
          *          протяжении использования объекта TelegaPackage.
          */
-        TelegaPackage(uint32_t* _time_ptr, TriaxialData* _acc_data_ptr, TriaxialData* _gyro_data_ptr, float* _temp_data_ptr):
-            time_ptr(_time_ptr), acc_data_ptr(_acc_data_ptr), gyro_data_ptr(_gyro_data_ptr), temp_data_ptr(_temp_data_ptr){
-
+        TelegaPackage(
+            uint32_t* _time_ptr, TriaxialData* _acc_data_ptr, 
+            TriaxialData* _gyro_data_ptr, float* _temp_data_ptr, int32_t* _dpp_code_ptr
+        ):
+            time_ptr(_time_ptr), acc_data_ptr(_acc_data_ptr), 
+            gyro_data_ptr(_gyro_data_ptr), temp_data_ptr(_temp_data_ptr), dpp_code_ptr(_dpp_code_ptr)
+        {
             // Последним байтом заголовка необходимо задать длину полезных данных:
             package_body.header[3] = sizeof(package_body) - sizeof(package_body.header) - sizeof(package_body.control_sum);
             
@@ -104,6 +111,7 @@ namespace Packages{
             package_body.acc_data = *acc_data_ptr;
             package_body.gyro_data = *gyro_data_ptr;
             package_body.temp = *temp_data_ptr;
+            package_body.dpp_code = *dpp_code_ptr;
         }
 
         /**
