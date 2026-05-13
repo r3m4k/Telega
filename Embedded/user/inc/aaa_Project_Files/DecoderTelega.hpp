@@ -67,10 +67,10 @@ namespace Decoder{
         static constexpr uint8_t HeaderSecondByte = 0x7E;
 
         /**
-         * @def     ImuCommandType
+         * @def     TelegaCommandType
          * @brief   Байт формата для командного пакета.
          */
-        static constexpr uint8_t ImuCommandType = 0xAB;
+        static constexpr uint8_t TelegaCommandType = 0xAB;
 
         /**
          * @brief   Возвращает функцию разбора пакета по байту формата.
@@ -78,13 +78,13 @@ namespace Decoder{
          * @return  DecodeFunc   Функция-обработчик пакета или nullptr,
          *                       если формат неизвестен.
          * @details Поддерживаемые форматы:
-         *          - ImuCommandType (0xAB) – командный пакет, обрабатывается
+         *          - TelegaCommandType (0xAB) – командный пакет, обрабатывается
          *            функцией process_command_packet.
          *          Возвращает nullptr для любых других значений.
          */
         DecodeFunc get_decode_func(uint8_t fmt){
             switch (fmt){
-                case ImuCommandType: return &process_command_packet;
+                case TelegaCommandType: return &process_command_packet;
                 default: return nullptr;
             }
         }

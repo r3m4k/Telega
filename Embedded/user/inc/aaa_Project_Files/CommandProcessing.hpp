@@ -82,12 +82,12 @@ namespace Commands{
     /**
      * @brief   Отложенная команда: отправка ack на handshake.
      */
-    inline StringCommand Send_Handshake_Ack_Cmd("HANDSHAKE_REQ", send_handshake_ack, ConfirmPolicy::NotRequired);
+    inline StringCommand Send_Handshake_Ack_Cmd("HANDSHAKE_ACK", send_handshake_ack, ConfirmPolicy::NotRequired);
 
     /**
      * @brief   Отложенная команда: отправка ack на heartbeat.
      */
-    inline StringCommand Send_Heartbeat_Ack_Cmd("HEARTBEAT_REQ", send_heartbeat_ack, ConfirmPolicy::NotRequired);
+    inline StringCommand Send_Heartbeat_Ack_Cmd("HEARTBEAT_ACK", send_heartbeat_ack, ConfirmPolicy::NotRequired);
 
     /**
      * @brief   Системная команда: отправка сообщения об ошибке.
@@ -113,15 +113,16 @@ namespace Commands{
          * @brief   Список срочных команд (исполняются в контексте декодера).
          */
         inline static const BaseCommand* urgent_commands[] = {
-            &Restart_Cmd,
-            &Send_Handshake_Ack_Cmd,
-            &Send_Heartbeat_Ack_Cmd,
+
         };
 
         /**
          * @brief   Список отложенных команд (помещаются в очередь).
          */
         inline static const BaseCommand* deferred_commands[] = {
+            &Restart_Cmd,
+            &Send_Handshake_Ack_Cmd,
+            &Send_Heartbeat_Ack_Cmd,
             &Set_FooStage_Cmd,
             &Set_CalibrationStage_Cmd,
             &Set_StaticInitStage_Cmd,
