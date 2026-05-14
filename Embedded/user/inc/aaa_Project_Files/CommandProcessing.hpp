@@ -113,16 +113,15 @@ namespace Commands{
          * @brief   Список срочных команд (исполняются в контексте декодера).
          */
         inline static const BaseCommand* urgent_commands[] = {
-
+            &Restart_Cmd,
+            &Send_Handshake_Ack_Cmd,
+            &Send_Heartbeat_Ack_Cmd,
         };
 
         /**
          * @brief   Список отложенных команд (помещаются в очередь).
          */
         inline static const BaseCommand* deferred_commands[] = {
-            &Restart_Cmd,
-            &Send_Handshake_Ack_Cmd,
-            &Send_Heartbeat_Ack_Cmd,
             &Set_FooStage_Cmd,
             &Set_CalibrationStage_Cmd,
             &Set_StaticInitStage_Cmd,

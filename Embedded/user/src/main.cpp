@@ -87,7 +87,8 @@ STM_CppLib::UsbPort::UsbPort com_port;
 STM_CppLib::STM_Timer::Timer3<[](){
     /* Объявление лямбды, которая будет вызываться в прерывании */
     leds.ChangeLedStatus(LED9);
-    timer_tick_flag = true;    
+    timer_tick_flag = true;
+    tick_counter++;
 }>  timer3;
 
 // Таймер для мерцания светодиодами LED6, LED7
@@ -287,9 +288,10 @@ void CalibrationStage_init(){
     timer4.ResetCounter();
 
     // Включим таймер для индикации работы и оба синих светодиода 
+    leds.LedsOff();
+    leds.LedOn(LED5);
+    leds.LedOn(LED8);
     timer4.Start();
-    leds.LedOn(LED9);
-    leds.LedOn(LED4);
 
 }
 
@@ -299,6 +301,7 @@ void CalibrationStage_execute(){
     sensor_L3GD20.InitGyroScaller();
     sensor_LSM303DLHC.InitAccScaller();
 
+    Delay(500);     // Сделаем небольшую паузу перед отправкой сообщения, чтобы ПК успел разобрать предыдущие посылки
     send_end_of_calibration_msg();
     program_stage_queue.put(&FooStage);
 }
@@ -310,6 +313,8 @@ void StaticStage_init(){
     tick_counter = 0;
     sensor_reading_counter = 0;
     leds.LedsOff();
+    leds.LedOn(LED4);
+    leds.LedOn(LED9);
     timer4.ResetCounter();
     timer4.Start();
 }
@@ -361,6 +366,7 @@ void StaticStage_execute(){
     }
 
     // В конце отправим сообщение об окончании выставки
+    Delay(500);     // Сделаем небольшую паузу перед отправкой сообщения, чтобы ПК успел разобрать предыдущие посылки
     send_end_of_static_init_msg();
     program_stage_queue.put(&FooStage);
 }
@@ -382,49 +388,51 @@ void MeasuringStage_init(){
 
 // Функция для исполнения MeasuringStage 
 void MeasuringStage_execute(){
-if (timer_tick_flag){
+    leds.ChangeLedStatus(LED9);
 
-    /* ***********************************************************************
-    * ВАЖНО! Длительность выполнения этой стадии не должна превышать 200мс
-    * для обеспечения выдачи данных с частотой 4 Гц. Длительность выполнения
-    * можно менять с помощью шаблонных параметров NSigmaFilter.
-    *********************************************************************** */
+    if (timer_tick_flag){
 
-    leds.LedOn(LED5);
+        /* ***********************************************************************
+        * ВАЖНО! Длительность выполнения этой стадии не должна превышать 200мс
+        * для обеспечения выдачи данных с частотой 4 Гц. Длительность выполнения
+        * можно менять с помощью шаблонных параметров NSigmaFilter.
+        *********************************************************************** */
 
-    while(!filter_acc.is_data_filtered() || !filter_gyro.is_data_filtered() || !filter_temp.is_data_filtered()){
-        // Считаем значения и добавим полученные значения в фильтры
-        sensor_L3GD20.ReadGyro();
-        filter_gyro.append_value(sensor_L3GD20.gyro_data);
+        leds.LedOn(LED5);
 
-        sensor_LSM303DLHC.ReadAcc();
-        filter_acc.append_value(sensor_LSM303DLHC.acc_data);
+        while(!filter_acc.is_data_filtered() || !filter_gyro.is_data_filtered() || !filter_temp.is_data_filtered()){
+            // Считаем значения и добавим полученные значения в фильтры
+            sensor_L3GD20.ReadGyro();
+            filter_gyro.append_value(sensor_L3GD20.gyro_data);
 
-        // Данные температуры будем считывать в 4 раза реже
-        if (sensor_reading_counter++ % 4 == 0) {
-            sensor_LSM303DLHC.ReadTemp();
-            filter_temp.append_value(sensor_LSM303DLHC.temperature);
+            sensor_LSM303DLHC.ReadAcc();
+            filter_acc.append_value(sensor_LSM303DLHC.acc_data);
+
+            // Данные температуры будем считывать в 4 раза реже
+            if (sensor_reading_counter++ % 4 == 0) {
+                sensor_LSM303DLHC.ReadTemp();
+                filter_temp.append_value(sensor_LSM303DLHC.temperature);
+            }
         }
+
+        // Обновим данные с датчиков
+        acc_value = filter_acc.get_filtered_data();
+        gyro_value = filter_gyro.get_filtered_data();
+        temp_value = filter_temp.get_filtered_data();
+
+        // Обновим данные в посылке и отправим её по com-порту
+        telega_package.UpdateData();
+        telega_package.UpdateControlSum();
+        com_port.SendPackage(telega_package);
+
+        // Сбросим фильтры
+        filter_acc.reset();
+        filter_gyro.reset();
+        filter_temp.reset();
+
+        leds.LedOff(LED5);
+        timer_tick_flag = false;
     }
-
-    // Обновим данные с датчиков
-    acc_value = filter_acc.get_filtered_data();
-    gyro_value = filter_gyro.get_filtered_data();
-    temp_value = filter_temp.get_filtered_data();
-
-    // Обновим данные в посылке и отправим её по com-порту
-    telega_package.UpdateData();
-    telega_package.UpdateControlSum();
-    com_port.SendPackage(telega_package);
-
-    // Сбросим фильтры
-    filter_acc.reset();
-    filter_gyro.reset();
-    filter_temp.reset();
-
-    leds.LedOff(LED5);
-    timer_tick_flag = false;
-}
 }
 
 // -------------------------------------------------------------------------------
