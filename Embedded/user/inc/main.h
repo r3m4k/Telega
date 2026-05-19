@@ -91,6 +91,9 @@
 // Инициализация оборудования
 void InitAll();
 
+// Обработчик прерывания от линии Dpp_Channel_1
+void dpp_irq_handler(void);
+
 // Функции для отработки стадий программы
 void FooStage_init();
 void FooStage_execute();

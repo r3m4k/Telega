@@ -7,6 +7,7 @@
 #include "Leds.hpp"
 #include "L3GD20.hpp"
 #include "LSM303DLHC.hpp"
+#include "DppSensor.hpp"
 #include "TelegaPackage.hpp"
 
 #include "RingBuffer.hpp"
@@ -64,7 +65,6 @@ _user_pHandler _user_vector_table[IST_VECTORS_NUM] = {0};
 
 // Необходимые счётчики и флаг
 uint32_t tick_counter = 0;
-int32_t dpp_code = 0;
 volatile bool timer_tick_flag = false;
 
 // Счётчик, необходимый для снижения частоты опроса температурного датчика
@@ -101,11 +101,24 @@ STM_CppLib::STM_Timer::Timer4<[](){
 
 /* ****************************************************************************
  * Объявление датчиков, используемых фильтров и пакетов данных
+ *
+ * Конфигурация датчика пройденного пути:
+ * PinPulse:     PC1
+ * PinDirection: PC3
  *************************************************************************** */
 
 STM_CppLib::L3GD20      sensor_L3GD20;          // Встроенный гироскоп
 STM_CppLib::LSM303DLHC  sensor_LSM303DLHC;      // Встроенный датчик с акселерометром,
                                                 // магнитным и температурным датчиками
+
+// Определение пинов для датчика ДПП ------------------------------------------
+using PinPulse_t = STM_CppLib::STM_GPIO::GPIO_Pin_EXTI
+    <STM_CppLib::STM_GPIO::GPIO_Port::PortC, GPIO_PinSource1, dpp_irq_handler>;
+
+using PinDirection_t = STM_CppLib::STM_GPIO::GPIO_Pin
+    <STM_CppLib::STM_GPIO::GPIO_Port::PortC, GPIO_PinSource3>;
+
+Dpp::DppSensor<PinPulse_t, PinDirection_t> dpp_sensor;
 
 // Используемые фильтры
 NSigmaFilter<TriaxialData, 4, 16> filter_acc(2.0);     // Фильтр ускорений
@@ -120,7 +133,7 @@ float temp_value;
 // Посылка данных
 // TODO: в дальнейшем, надо добавить пульт 
 Packages::TelegaPackage telega_package(
-    &tick_counter, &acc_value, &gyro_value, &temp_value, &dpp_code
+    &tick_counter, &acc_value, &gyro_value, &temp_value, &dpp_sensor.dpp_code
 );
 
 /* ****************************************************************************
@@ -242,6 +255,7 @@ void InitAll(){
 
     sensor_L3GD20.Init();
     sensor_LSM303DLHC.Init();
+    dpp_sensor.Init();
     
     com_port.Init();
 
@@ -252,6 +266,13 @@ void InitAll(){
     // Настройка таймера для мерцания светодиодами с периодом счёта в 2 с
     uint32_t tim4_period = 20000 - 1;
     timer4.Init(tim4_period);
+}
+
+// -------------------------------------------------------------------------------
+// Обработчик прерывания от линии Dpp_Channel_1
+// -------------------------------------------------------------------------------
+void dpp_irq_handler(){
+    dpp_sensor.process_front();
 }
 
 // -------------------------------------------------------------------------------
@@ -297,6 +318,10 @@ void CalibrationStage_init(){
 
 // Функция для исполнения CalibrationStage 
 void CalibrationStage_execute(){
+
+    // Задержка, чтобы отсечь колебания установки от нажатие кнопки оператором
+    Delay(2000);
+
     // Запустим инициализацию масштабирующего коэффициента датчиков
     sensor_L3GD20.InitGyroScaller();
     sensor_LSM303DLHC.InitAccScaller();
@@ -321,6 +346,10 @@ void StaticStage_init(){
 
 // Функция для исполнения StaticStage
 void StaticStage_execute(){
+
+    // Задержка, чтобы отсечь колебания установки от нажатие кнопки оператором
+    Delay(2000);
+
     // Сбросим фильтры перед сбором данных
     filter_acc.reset();
     filter_gyro.reset();

@@ -54,6 +54,25 @@ namespace STM_CppLib{
         };
 
         /**
+         * @brief   Концепт, описывающий требования к типу пина GPIO с поддержкой EXTI.
+         * @tparam  T   Тип, который проверяется на соответствие концепту.
+         * @details Концепт расширяет GpioPinConcept и требует наличия методов,
+         *          аналогичных методам класса GPIO_Pin_EXTI.
+         */
+        template <typename T>
+        concept GpioPinExtiConcept = GpioPinConcept<T> && requires(T pin) {
+            { pin.InitExti(static_cast<EXTI_InitTypeDef*>(nullptr)) } -> std::same_as<void>;
+            { pin.GenerateSWInterrupt() } -> std::same_as<void>;
+            { pin.InitPinExti(GPIOMode_TypeDef(),
+                              GPIOPuPd_TypeDef(),
+                              GPIOSpeed_TypeDef(),
+                              GPIOOType_TypeDef(),
+                              static_cast<EXTI_InitTypeDef*>(nullptr),
+                              static_cast<NVIC_InitTypeDef*>(nullptr)) } -> std::same_as<void>;
+            { pin.irq_handler() } -> std::same_as<void>;
+        };
+
+        /**
          * @brief   Шаблонный класс для управления конкретным выводом GPIO.
          * @tparam  port        Порт GPIO (значение перечисления GPIO_Port).
          * @tparam  pin_source  Номер вывода (0..15).
