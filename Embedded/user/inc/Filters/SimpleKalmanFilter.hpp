@@ -1,5 +1,5 @@
 /** ****************************************************************************
- * @file       SimpleKalman3dFilter.hpp
+ * @file       SimpleKalmanFilter.hpp
  * @brief      Заголовочный файл класса SimpleKalman3dFilter - упрощенного 
  *             фильтра Калмана для трехмерных данных
  * 
@@ -14,12 +14,13 @@
  **************************************************************************** */
 
 /* Define to prevent recursive inclusion -------------------------------------*/
-#ifndef __SIMPLE_KALMAN_FILTER_HPP
-#define __SIMPLE_KALMAN_FILTER_HPP
+#ifndef SIMPLE_KALMAN_FILTER_HPP
+#define SIMPLE_KALMAN_FILTER_HPP
 
 /* Includes ------------------------------------------------------------------*/
 #include <stdint.h>
 #include "TriaxialData.hpp"
+#include "MathType.hpp"
 
 /* Defines -------------------------------------------------------------------*/
 
@@ -27,7 +28,7 @@
 
 // -----------------------------------------------------------------------------
 /**
- * @class SimpleKalman3dFilter
+ * @class SimpleKalmanFilter
  * @brief Упрощенный одномерный фильтр Калмана для трехкомпонентных данных
  * 
  * Класс реализует упрощенный фильтр Калмана для независимой фильтрации 
@@ -40,24 +41,27 @@
  * @warning Параметры Q и R являются константными и задаются при создании объекта.
  *          Для изменения параметров требуется создание нового фильтра.
  * 
+ * @warning Отсутствует проверка деления на ноль и нулевой элемент типа T.
+ * 
  * @see TriaxialData
 
  */
-class SimpleKalman3dFilter{
+template <MathType T>
+class SimpleKalmanFilter{
 private:
-    const TriaxialData Q;   /**< Шум процесса (процессная ковариация)       */    
-    const TriaxialData R;   /**< Шум измерений (измерительная ковариация)   */
-    TriaxialData K;         /**< Коэффициент Калмана (Kalman gain)          */    
-    TriaxialData P;         /**< Апостериорная ковариация ошибки оценки     */
+    const T Q;   /**< Шум процесса (процессная ковариация)       */    
+    const T R;   /**< Шум измерений (измерительная ковариация)   */
+    T K;         /**< Коэффициент Калмана (Kalman gain)          */    
+    T P;         /**< Апостериорная ковариация ошибки оценки     */
 public:
-    TriaxialData filtered_value;   /**< Текущая оценка состояния            */
+    T filtered_value;   /**< Текущая оценка состояния            */
 
 public:
     /**
      * @brief Удаленный конструктор по умолчанию
      * @details Запрещает создание фильтра без указания параметров шума.
      */
-    SimpleKalman3dFilter() = delete;
+    SimpleKalmanFilter() = delete;
     
     /**
      * @brief Основной конструктор фильтра Калмана
@@ -70,23 +74,20 @@ public:
      * 
      * @warning После создания фильтра параметры Q и R нельзя изменить.
      */
-    SimpleKalman3dFilter(
-        TriaxialData _Q = TriaxialData(0.0001, 0.0001, 0.0001), 
-        TriaxialData _R = TriaxialData(0.005, 0.005, 0.005)
-    ): Q(_Q), R(_R), K(), P(), filtered_value() {}
+    SimpleKalmanFilter(T _Q, T _R): Q(_Q), R(_R), K(), P(), filtered_value() {}
     
     /**
      * @brief Добавить новое измерение и выполнить фильтрацию
      * @param input_value Новое измерение от датчика
      */
-    void append_value(const TriaxialData& input_value) {
-        TriaxialData pred_value = filtered_value;
-        TriaxialData P_pred = P + Q;
+    void append_value(const T& input_value) {
+        T pred_value = filtered_value;
+        T P_pred = P + Q;
 
         K = P_pred / (P_pred + R);
         filtered_value = pred_value + K * (input_value - pred_value);
-        P = (TriaxialData(1, 1, 1) - K) * P_pred;
+        P = (T(1.0f) - K) * P_pred;
     }
 };
 
-#endif /*   __SIMPLE_KALMAN_FILTER_HPP   */
+#endif /*   SIMPLE_KALMAN_FILTER_HPP   */

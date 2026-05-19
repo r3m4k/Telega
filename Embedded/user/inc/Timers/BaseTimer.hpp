@@ -19,7 +19,6 @@
 #include "stm32f30x_misc.h"
 #include "stm32f30x_tim.h"
 
-#include "Periphery.hpp"
 #include "TimerConfig.hpp"
 
 /* Defines -------------------------------------------------------------------*/
@@ -27,19 +26,31 @@
  * @def     Prescaler_1kHz
  * @brief   Предделитель для получения частоты счёта 1 кГц
  */
-#define     Prescaler_1kHz         72000
+#define     Prescaler_1kHz         72000 - 1
 
 /**
  * @def     Prescaler_10kHz
  * @brief   Предделитель для частоты счёта 10 кГц
  */
-#define     Prescaler_10kHz        7200
+#define     Prescaler_10kHz        7200 - 1
 
 /**
  * @def     Prescaler_100kHz
  * @brief   Предделитель для частоты счёта 100 кГц
  */
-#define     Prescaler_100kHz       720
+#define     Prescaler_100kHz       720 - 1
+
+/**
+ * @def     Prescaler_1MHz
+ * @brief   Предделитель для частоты счёта 1 МГц
+ */
+#define     Prescaler_1MHz          72 - 1
+
+/**
+ * @def     Prescaler_2MHz
+ * @brief   Предделитель для частоты счёта 2 МГц
+ */
+#define     Prescaler_2MHz          36 - 1
 
 /* Global variables ----------------------------------------------------------*/
 

@@ -84,7 +84,10 @@ namespace STM_CppLib{
                 break; 
             }
 
-            // Вычислим масштабирующий коэффициент
+        }
+
+        void InitGyroScaller(){
+            // Вычислим масштабирующий коэффициент для угловой скорости
             SensorScaller<L3GD20> gyro_scaller{this, &gyro_data, TrueAbsGyroVal};
             gyro_scaller.Init();
             gyro_scale_rate = gyro_scaller.scale_rate;

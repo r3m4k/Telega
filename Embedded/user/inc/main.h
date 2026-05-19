@@ -91,19 +91,34 @@
 // Инициализация оборудования
 void InitAll();
 
+// Обработчик прерывания от линии Dpp_Channel_1
+void dpp_irq_handler(void);
+
+// Функции для отработки стадий программы
+void FooStage_init();
+void FooStage_execute();
+void CalibrationStage_init();
+void CalibrationStage_execute();
+void StaticStage_init();
+void StaticStage_execute();
+void MeasuringStage_init();
+void MeasuringStage_execute();
+
 // Функции для отработки поступивших команд
 void UserEP3_OUT_Callback(uint8_t *buffer);
 void restart(void);
-void start_InitialSetting(void);
-void start_Measuring(void);
-void stop_Measuring(void);
-void stop_CollectingData(void);
+void set_FooStage(void);
+void set_CalibrationStage(void);
+void set_StaticStage(void);
+void set_MeasureStage(void);
 
 // Отправка предопределённых сообщений
 void send_confirm_msg(void);
-void send_hello_msg(void);
+void send_handshake_ack(void);
+void send_heartbeat_ack(void);
 void send_error_msg(void);
-void send_end_of_initial_setting_msg(void);
+void send_end_of_calibration_msg(void);
+void send_end_of_static_init_msg(void);
 
 // Системные функции
 void Error_Handler(void);

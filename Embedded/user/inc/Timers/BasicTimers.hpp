@@ -1,18 +1,18 @@
 /** ***************************************************************************
- * @file    GPTimers.hpp
+ * @file    BasicTimers.hpp
  * @author  Романовский Роман
- * @brief   Таймеры общего назначения (TIM2, TIM3, TIM4) для STM32F30x
+ * @brief   Базовые таймеры (TIM6, TIM7) для STM32F30x
  * 
- * @details Предоставляет шаблонный класс GPTimer, объединяющий управление
+ * @details Предоставляет шаблонный класс BasicTimer, объединяющий управление
  *          аппаратным таймером (BaseTimer) и настройку прерываний (BaseIRQDevice)
  *          с возможностью задания пользовательского обработчика на этапе
  *          компиляции. Для удобства использования определены псевдонимы
- *          Timer2, Timer3, Timer4.
+ *          Timer6, Timer7.
  *************************************************************************** */
 
 /* Define to prevent recursive inclusion -------------------------------------*/
-#ifndef GP_TIMER_HPP
-#define GP_TIMER_HPP
+#ifndef BASIC_TIMERS_HPP
+#define BASIC_TIMERS_HPP
 
 /* Includes ------------------------------------------------------------------*/
 #include <stdint.h>
@@ -39,9 +39,9 @@ namespace STM_CppLib{
         
         // ---------------------------------------------------------------------
         /**
-         * @brief   Шаблонный класс для работы с таймерами общего назначения.
+         * @brief   Шаблонный класс для работы с базовыми таймерами.
          * 
-         * @tparam  timer_type   Тип таймера (Timer2, Timer3, Timer4).
+         * @tparam  timer_type   Тип таймера.
          * @tparam  external_irq_handler   Пользовательский обработчик прерывания.
          *          Может быть указателем на функцию или лямбда-выражением без захвата.
          * 
@@ -51,26 +51,25 @@ namespace STM_CppLib{
          *          вызов выполняется напрямую без виртуальных функций.
          */
         template<TimerTypes timer_type, auto external_irq_handler>
-        class GPTimer: public BaseTimer, public BaseIRQDevice<GPTimer<timer_type, external_irq_handler>, 
-                                                                TimerDescriptor<timer_type>::IRQn>{
+        class BasicTimer: public BaseTimer, public BaseIRQDevice<BasicTimer<timer_type, external_irq_handler>, 
+                                                                 TimerDescriptor<timer_type>::IRQn>{
 
             static_assert(
-                timer_type == TimerTypes::Timer2 || 
-                timer_type == TimerTypes::Timer3 || 
-                timer_type == TimerTypes::Timer4, 
-                "timer_type not is general purpose timer"
+                timer_type == TimerTypes::Timer6 || 
+                timer_type == TimerTypes::Timer7,
+                "timer_type not is basic timer"
             );
 
         public:
             /**
-             * @brief   Конструктор объекта GPTimer.
+             * @brief   Конструктор объекта BasicTimer.
              * 
              * @details Инициализирует указатель на собственный экземпляр как
              *          обработчик прерывания (irq_device_ptr) и сохраняет
              *          указатель на регистровую структуру таймера TIMx,
              *          полученный через TimerDescriptor.
              */
-            GPTimer(){
+            BasicTimer(){
                 this->irq_device_ptr = this;
                 this->TIMx = TimerDescriptor<timer_type>::get_TIMx();
             }
@@ -79,7 +78,7 @@ namespace STM_CppLib{
              * @brief   Инициализация таймера и настройка его прерывания.
              * 
              * @param   tim_period   Период счёта таймера.
-             * @param   prescaller   Делитель тактовой частоты таймера.
+             * @param   prescaler   Делитель тактовой частоты таймера.
              * @param   timer_config_ptr   Указатель на пользовательскую конфигурацию таймера.
              *                      Если передан nullptr, используется конфигурация по умолчанию
              *                      с заданными периодом и предделителем.
@@ -89,13 +88,13 @@ namespace STM_CppLib{
              * @details Метод предоставляет два способа инициализации:
              *          - Через готовую структуру TimerConfig (если указатель не nullptr).
              *          - Автоматически: используется RCC_APB1PeriphClockCmd,
-             *            RCC_Periph из TimerDescriptor, заданные prescaller и tim_period.
+             *            RCC_Periph из TimerDescriptor, заданные prescaler и tim_period.
              *          После инициализации таймера настраивается прерывание
              *          с указанными приоритетами.
              */
             void Init(
                 uint32_t tim_period = 1000,
-                uint16_t prescaller = Prescaler_10kHz,
+                uint16_t prescaler = Prescaler_10kHz,
                 TimerConfig* timer_config_ptr = nullptr,
                 uint8_t NVIC_IRQChannelPreemptionPriority = DefaultIRQChannelPreemptionPriority,
                 uint8_t NVIC_IRQChannelSubPriority = DefaultIRQChannelSubPriority
@@ -104,7 +103,7 @@ namespace STM_CppLib{
                     TimerConfig timer_config = {
                         .PeriphClockCmd = RCC_APB1PeriphClockCmd,
                         .RCC_PeriphClock = TimerDescriptor<timer_type>::RCC_Periph,
-                        .TimPrescaler = prescaller,
+                        .TimPrescaler = prescaler,
                         .TimPeriod = tim_period
                     };
 
@@ -139,78 +138,23 @@ namespace STM_CppLib{
         // ---------------------------------------------------------------------
 
         /**
-         * @brief   Псевдоним GPTimer для таймера TIM2.
+         * @brief   Псевдоним BasicTimer для таймера TIM6.
          * @tparam  external_irq_handler   Пользовательский обработчик прерывания.
          */
         template<auto external_irq_handler>
-        using Timer2 = GPTimer<TimerTypes::Timer2, external_irq_handler>;
+        using Timer6 = BasicTimer<TimerTypes::Timer6, external_irq_handler>;
 
         /**
-         * @brief   Псевдоним GPTimer для таймера TIM3.
+         * @brief   Псевдоним BasicTimer для таймера TIM7.
          * @tparam  external_irq_handler   Пользовательский обработчик прерывания.
          */
         template<auto external_irq_handler>
-        using Timer3 = GPTimer<TimerTypes::Timer3, external_irq_handler>;
-
-        /**
-         * @brief   Псевдоним GPTimer для таймера TIM4.
-         * @tparam  external_irq_handler   Пользовательский обработчик прерывания.
-         */
-        template<auto external_irq_handler>
-        using Timer4 = GPTimer<TimerTypes::Timer4, external_irq_handler>;
+        using Timer7 = BasicTimer<TimerTypes::Timer7, external_irq_handler>;
 
         // ---------------------------------------------------------------------
 
     } // namespace STM_Timer
 } // namespace STM_CppLib
 
-/**
- * @todo   Реализовать полную поддержку аппаратных возможностей таймеров общего назначения (TIM2–TIM4).
- * 
- * Текущая реализация класса GPTimer предоставляет только базовый функционал time-base с прерыванием
- * по событию обновления (Update). Для использования всех возможностей GP-таймеров необходимо добавить:
- * 
- * 1. **Каналы захвата/сравнения (Capture/Compare):**
- *    - Методы для настройки режимов каждого канала: входной захват, выходное сравнение, ШИМ (PWM1/PWM2).
- *    - Функции установки значений сравнения (CCR) и чтения захваченных значений.
- *    - Управление полярностью, предварительной загрузкой, фильтрацией входного сигнала.
- * 
- * 2. **Прерывания:**
- *    - Обработка прерываний от каналов (CC1..CC4), событий Trigger, Break (для TIM1/8) и др.
- *    - Расширение механизма BaseIRQDevice для поддержки нескольких обработчиков или создание отдельных классов
- *      для каждого типа прерывания (как предложено для Advanced Timer).
- * 
- * 3. **DMA (Direct Memory Access):**
- *    - Настройка запросов DMA при событиях (Update, CC1, CC2 и т.д.).
- *    - Методы для связывания с каналами DMA, конфигурации направления (чтение/запись), включения/выключения.
- * 
- * 4. **Триггеры и синхронизация:**
- *    - Настройка slave mode (например, сброс по триггеру, запуск по триггеру).
- *    - Настройка master mode (генерация триггерных сигналов для других таймеров или ЦАП).
- *    - Выбор источника внутреннего/внешнего триггера (ITR, TIx, ETR).
- * 
- * 5. **Режим квадратурного энкодера:**
- *    - Конфигурация таймера для работы с энкодером (TI1, TI2, подсчёт импульсов).
- *    - Чтение текущего значения счётчика и направления вращения.
- * 
- * 6. **Динамическая перенастройка:**
- *    - Методы setPeriod(), setPrescaler() для изменения частоты/периода "на лету" с учётом синхронизации
- *      (предотвращение глитчей через использование предварительной загрузки).
- *    - Возможность переконфигурации каналов без полной остановки таймера.
- * 
- * 7. **Дополнительные возможности:**
- *    - Настройка ClockDivision (TDTS) для фильтрации входных сигналов.
- *    - Программная генерация событий (generateEvent) для тестирования и синхронизации.
- *    - Управление предварительной загрузкой регистров (ARR, CCR) и возможностью блокировки (LOCK).
- * 
- * 8. **Поддержка других типов таймеров:**
- *    - Расширить TimerDescriptor и добавить псевдонимы для базовых (TIM6, TIM7) и advanced (TIM1, TIM8) таймеров.
- *    - Учесть особенности advanced-таймеров: комплементарные выходы, dead-time insertion, break input.
- * 
- * При проектировании расширений желательно сохранить существующий подход (compile-time конфигурация,
- * шаблоны, CRTP) для минимизации накладных расходов. Рекомендуется разбить функционал на отдельные
- * компоненты (например, Channel, DMA, Trigger), которые можно подключать к основному классу через
- * композицию или наследование.
- */
 
-#endif /*   GP_TIMER_HPP   */
+#endif /*   BASIC_TIMERS_HPP   */

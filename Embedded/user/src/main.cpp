@@ -7,9 +7,12 @@
 #include "Leds.hpp"
 #include "L3GD20.hpp"
 #include "LSM303DLHC.hpp"
+#include "DppSensor.hpp"
 #include "TelegaPackage.hpp"
-#include "ComPort.hpp"
-#include "Message.hpp"
+
+#include "RingBuffer.hpp"
+#include "UsbPort.hpp"
+#include "MessagePackage.hpp"
 #include "CommandProcessing.hpp"
 #include "NSigmaFilter.hpp"
 
@@ -39,62 +42,56 @@ __IO uint8_t buttonState;
 // ===============================================================================
 
 
+/* Defines -------------------------------------------------------------------*/
+#define IST_VECTORS_NUM     98      // Количество векторов прерываний
+#define InitFrameNum        256     // Количество пакетов для выставки
+
 /* Global variables ---------------------------------------------------------*/
+
 typedef void
 (* const pHandler)(void);
 
 extern pHandler __isr_vectors[];
 
-// ----------------------------------------------------------------------------
-#define IST_VECTORS_NUM     98      // Количество векторов прерываний
-#define InitFrameNum        256     // Количество пакетов для выставки
-#define MessageLen          8       // Длина информационных сообщений
- 
+/* ****************************************************************************
+ * Пользовательские переменные
+ *************************************************************************** */
 
 // Собственная таблица прерываний
 __attribute__((aligned(128)))    // Cortex-M4 требует выравнивание по 128 байт!
 _user_pHandler _user_vector_table[IST_VECTORS_NUM] = {0};
 
-// -------------------------------------------------------------------------------
-
-// Перечисление для стадии выполнения программы
-enum class ProgramStages{
-    BeforeBeginning,    // Фиктивная стадия программы (необходима для индикации первой смены стадии программы)
-    FooStage,           // Данные с датчиков считываются, но не фильтруются и не отправляются
-    InitialSetting,     // Сбор и отправка данных для выставки 
-    Measuring,          // Сбор и отправка данных с частотой 4 Гц
-};
-
-// Тк будем менять стадии программы из других файлов, то разместим стадии в глобальной зоне видимости
-auto stage = ProgramStages::FooStage;
-auto previous_stage = ProgramStages::BeforeBeginning;
-
 // ----------------------------------------------------------------------------
 
-uint32_t tick_counter = 0;      // Счётчик тиков основного таймера
+// Необходимые счётчики и флаг
+uint32_t tick_counter = 0;
 volatile bool timer_tick_flag = false;
 
+// Счётчик, необходимый для снижения частоты опроса температурного датчика
+uint8_t sensor_reading_counter = 0;     
+
 // ----------------------------------------------------------------------------
 
-// Периферия
-STM_CppLib::Leds        leds;                   // Светодиоды на плате
-STM_CppLib::L3GD20      sensor_L3GD20;          // Встроенный гироскоп
-STM_CppLib::LSM303DLHC  sensor_LSM303DLHC;      // Встроенный датчик с акселерометром,
-                                                // магнитным и температурным датчиками
+// Светодиоды на плате
+STM_CppLib::Leds leds;
 
 // Обработчик поступивших команд
-STM_CppLib::Commands::CommandManager command_manager;
+Commands::CommandManager command_manager;
 
 // Интерфейсы связи
-STM_CppLib::ComPort::ComPort com_port;
+STM_CppLib::UsbPort::UsbPort com_port;
 
-// Используемые таймеры
+// Используемые таймеры -------------------------------------------------------
+
+// Таймер для чтения данных
 STM_CppLib::STM_Timer::Timer3<[](){
     /* Объявление лямбды, которая будет вызываться в прерывании */
     leds.ChangeLedStatus(LED9);
-    timer_tick_flag = true;    
+    timer_tick_flag = true;
+    tick_counter++;
 }>  timer3;
 
+// Таймер для мерцания светодиодами LED6, LED7
 STM_CppLib::STM_Timer::Timer4<[](){
     /* Объявление лямбды, которая будет вызываться в прерывании */
     leds.ChangeLedStatus(LED6);
@@ -102,8 +99,80 @@ STM_CppLib::STM_Timer::Timer4<[](){
 }>  timer4;     // Таймер для мерцания светодиодами LED6, LED7
 
 
+/* ****************************************************************************
+ * Объявление датчиков, используемых фильтров и пакетов данных
+ *
+ * Конфигурация датчика пройденного пути:
+ * PinPulse:     PC1
+ * PinDirection: PC3
+ *************************************************************************** */
+
+STM_CppLib::L3GD20      sensor_L3GD20;          // Встроенный гироскоп
+STM_CppLib::LSM303DLHC  sensor_LSM303DLHC;      // Встроенный датчик с акселерометром,
+                                                // магнитным и температурным датчиками
+
+// Определение пинов для датчика ДПП ------------------------------------------
+using PinPulse_t = STM_CppLib::STM_GPIO::GPIO_Pin_EXTI
+    <STM_CppLib::STM_GPIO::GPIO_Port::PortC, GPIO_PinSource1, dpp_irq_handler>;
+
+using PinDirection_t = STM_CppLib::STM_GPIO::GPIO_Pin
+    <STM_CppLib::STM_GPIO::GPIO_Port::PortC, GPIO_PinSource3>;
+
+Dpp::DppSensor<PinPulse_t, PinDirection_t> dpp_sensor;
+
+// Используемые фильтры
+NSigmaFilter<TriaxialData, 4, 16> filter_acc(2.0);     // Фильтр ускорений
+NSigmaFilter<TriaxialData, 4, 16> filter_gyro(2.0);    // Фильтр угловой скорости 
+NSigmaFilter<float, 1, 16>        filter_temp(2.0);    // Фильтр температуры
+
+// Значения ускорений, угловой скорости и температуры для отправки
+TriaxialData acc_value;
+TriaxialData gyro_value;
+float temp_value;
+
+// Посылка данных
+// TODO: в дальнейшем, надо добавить пульт 
+Packages::TelegaPackage telega_package(
+    &tick_counter, &acc_value, &gyro_value, &temp_value, &dpp_sensor.dpp_code
+);
+
+/* ****************************************************************************
+ * Описание стадий программы
+ *************************************************************************** */
+
+class ProgramStage{
+    CommandHandlerFunc init_func;
+    CommandHandlerFunc execute_func;
+    
+public:
+    bool is_init = false;
+
+    ProgramStage(CommandHandlerFunc _init_func, CommandHandlerFunc _execute_func):
+        init_func(_init_func), execute_func(_execute_func) {}
+
+    void init(){
+        init_func();
+        is_init = true;
+    }
+
+    void execute(){
+        execute_func();
+    }
+};
+
 // -------------------------------------------------------------------------------
 
+// Очередь стадий программ (используется для смены стадий программ).
+RingBuffer<ProgramStage*, 2> program_stage_queue;
+
+// Поддерживаемые стадии программы
+ProgramStage FooStage(FooStage_init, FooStage_execute);
+ProgramStage CalibrationStage(CalibrationStage_init, CalibrationStage_execute);
+ProgramStage StaticStage(StaticStage_init, StaticStage_execute);
+ProgramStage MeasuringStage(MeasuringStage_init, MeasuringStage_execute);
+
+
+/* **************************************************************************** */
 
 int main()
 {
@@ -143,185 +212,37 @@ int main()
 
     // ---------------------------------------------------------------------------
 
-    // Используемые фильтры
-    NSigmaFilter<TriaxialData, 4, 16> filter_acc(2.0);     // Фильтр ускорений
-    NSigmaFilter<TriaxialData, 4, 16> filter_gyro(2.0);    // Фильтр угловой скорости 
-    NSigmaFilter<float, 1, 16>        filter_temp(2.0);    // Фильтр температуры
-
-    // Значения ускорений, угловой скорости и температуры для отправки
-    TriaxialData acc_value;
-    TriaxialData gyro_value;
-    float temp_value;
-
-    // Посылка данных
-    // TODO: в дальнейшем, надо добавить датчик ДПП и пульт 
-    STM_CppLib::STM_Packages::TelegaPackage telega_package(
-        &acc_value, &gyro_value, &temp_value
-    );
-
-    // Счётчик, необходимый для снижения частоты опроса температурного датчика
-    uint8_t sensor_reading_counter = 0;     
+    // Изначально добавим FooStage в program_stage_queue
+    program_stage_queue.put(&FooStage);
+    ProgramStage* current_stage_ptr = &FooStage;
 
     // ---------------------------------------------------------------------------
     // Основной цикл программы
     while (true)
     {
-        // Проверка очереди поступивших команд 
-        if (!command_manager.command_queue.is_empty()){
+        // Выполним все поступившие команды при их наличии
+        while (!command_manager.command_queue.is_empty()){
             auto command = command_manager.command_queue.get();
             command.execute();
         }
 
+        // Сменим current_stage_ptr, если есть элементы в очереди program_stage_queue
+        if(!program_stage_queue.is_empty()){
+            current_stage_ptr->is_init = false;     // Сбросим флаг у текущей стадии
+            current_stage_ptr = program_stage_queue.get();
+        }
+
         /* ***********************************************************************
         ШАБЛОН ОТРАБОТКИ СТАДИИ ПРОГРАММЫ:
-        Каждая стадия (stage) отрабатывается по единому принципу:
+        Каждая стадия (ProgramStage) отрабатывается по единому принципу:
         1. ИНИЦИАЛИЗАЦИЯ СТАДИИ (однократное выполнение при входе в стадию)
         2. ЦИКЛИЧЕСКОЕ ВЫПОЛНЕНИЕ ОСНОВНОЙ ЛОГИКИ СТАДИИ
         *********************************************************************** */
 
-        switch (stage)
-        {
-        case ProgramStages::FooStage:
-            if (previous_stage != ProgramStages::FooStage){
-                previous_stage = ProgramStages::FooStage;
-                // Выключим все таймеры
-                timer3.Stop();
-                timer3.ResetCounter();
-                timer4.Stop();
-                timer4.ResetCounter();
-                // Включим все светодиоды
-                leds.LedsOn();
-            }
-
-            // Периодическое чтение данных для поддержания температуры кристалла датчиков
-            // Возможно, это излишне
-            sensor_L3GD20.ReadData();
-            sensor_LSM303DLHC.ReadData();
-
-            break;
-
-        case ProgramStages::InitialSetting:
-            if (previous_stage != ProgramStages::InitialSetting){
-                previous_stage = ProgramStages::InitialSetting;
-                tick_counter = 0;
-                sensor_reading_counter = 0;
-                leds.LedsOff();
-                timer4.ResetCounter();
-                timer4.Start();
-            }
-
-            // Сбросим фильтры перед сбором данных
-            filter_acc.reset();
-            filter_gyro.reset();
-            filter_temp.reset();
-
-            for(int i = 0; i < InitFrameNum; i++){
-
-                /* ***************************************************************
-                * Параметры фильтров подобраны так, что все фильтры готовятся за 
-                * одинаковое число итераций, что критически важно для корректности 
-                * отработки цикла!
-                *************************************************************** */
-
-                while(!filter_acc.is_data_filtered() || !filter_gyro.is_data_filtered() || !filter_temp.is_data_filtered()){
-                    // Считаем значения и добавим полученные значения в фильтры
-                    sensor_L3GD20.ReadGyro();
-                    filter_gyro.append_value(sensor_L3GD20.gyro_data);
-                    
-                    sensor_LSM303DLHC.ReadAcc();
-                    filter_acc.append_value(sensor_LSM303DLHC.acc_data);
-
-                    // Данные температуры будем считывать в 4 раза реже
-                    if (sensor_reading_counter++ % 4 == 0) {
-                        sensor_LSM303DLHC.ReadTemp();
-                        filter_temp.append_value(sensor_LSM303DLHC.temperature);
-                    }
-                }
-
-                // Обновим данные с датчиков
-                acc_value = filter_acc.get_filtered_data();
-                gyro_value = filter_gyro.get_filtered_data();
-                temp_value = filter_temp.get_filtered_data();
-
-                // Обновим данные в посылке и отправим её по com-порту
-                telega_package.UpdateData();
-                telega_package.UpdateTime(tick_counter++);  // Фиктивное изменение метки времени
-                telega_package.UpdateControlSum();
-                com_port.SendPackage(telega_package);
-
-                // Сбросим фильтры
-                filter_acc.reset();
-                filter_gyro.reset();
-                filter_temp.reset();
-            }
-
-            // В конце отправим сообщение об окончании выставки
-            send_end_of_initial_setting_msg();
-
-            stage = ProgramStages::FooStage;
-            break;
-
-        case ProgramStages::Measuring:
-            if (previous_stage != ProgramStages::Measuring){
-                previous_stage = ProgramStages::Measuring;
-                tick_counter = 0;
-                sensor_reading_counter = 0;
-                leds.LedsOff();
-                // Запустим таймер сбора данных с частотой 4 Гц
-                timer3.ResetCounter();
-                timer3.Start();
-                // Запустим таймер индикации работы
-                timer4.ResetCounter();
-                timer4.Start();
-            }
-
-            if (timer_tick_flag){
-
-                /* ***********************************************************************
-                * ВАЖНО! Длительность выполнения этой стадии не должна превышать 200мс
-                * для обеспечения выдачи данных с частотой 4 Гц. Длительность выполнения
-                * можно менять с помощью шаблонных параметров NSigmaFilter.
-                *********************************************************************** */
-
-                leds.LedOn(LED5);
-
-                while(!filter_acc.is_data_filtered() || !filter_gyro.is_data_filtered() || !filter_temp.is_data_filtered()){
-                    // Считаем значения и добавим полученные значения в фильтры
-                    sensor_L3GD20.ReadGyro();
-                    filter_gyro.append_value(sensor_L3GD20.gyro_data);
-
-                    sensor_LSM303DLHC.ReadAcc();
-                    filter_acc.append_value(sensor_LSM303DLHC.acc_data);
-    
-                    // Данные температуры будем считывать в 4 раза реже
-                    if (sensor_reading_counter++ % 4 == 0) {
-                        sensor_LSM303DLHC.ReadTemp();
-                        filter_temp.append_value(sensor_LSM303DLHC.temperature);
-                    }
-                }
-
-                // Обновим данные с датчиков
-                acc_value = filter_acc.get_filtered_data();
-                gyro_value = filter_gyro.get_filtered_data();
-                temp_value = filter_temp.get_filtered_data();
-
-                // Обновим данные в посылке и отправим её по com-порту
-                telega_package.UpdateData();
-                telega_package.UpdateTime(tick_counter++);
-                telega_package.UpdateControlSum();
-                com_port.SendPackage(telega_package);
-
-                // Сбросим фильтры
-                filter_acc.reset();
-                filter_gyro.reset();
-                filter_temp.reset();
-
-                leds.LedOff(LED5);
-                timer_tick_flag = false;
-            }
-
-            break;
+        if (!current_stage_ptr->is_init){
+            current_stage_ptr->init();
         }
+        current_stage_ptr->execute();        
     }
 }
 
@@ -334,6 +255,7 @@ void InitAll(){
 
     sensor_L3GD20.Init();
     sensor_LSM303DLHC.Init();
+    dpp_sensor.Init();
     
     com_port.Init();
 
@@ -347,11 +269,207 @@ void InitAll(){
 }
 
 // -------------------------------------------------------------------------------
+// Обработчик прерывания от линии Dpp_Channel_1
+// -------------------------------------------------------------------------------
+void dpp_irq_handler(){
+    dpp_sensor.process_front();
+}
+
+// -------------------------------------------------------------------------------
+// Функции для отработки стадий программы
+// -------------------------------------------------------------------------------
+
+// Функция для инициализации FooStage
+void FooStage_init(){
+    // Выключим все таймеры
+    timer3.Stop();
+    timer3.ResetCounter();
+    timer4.Stop();
+    timer4.ResetCounter();
+    // Включим все светодиоды
+    leds.LedsOn();
+}
+
+// Функция для исполнения FooStage 
+void FooStage_execute(){
+    // Периодическое чтение данных для поддержания температуры кристалла датчиков
+    // Возможно, это излишне
+    sensor_L3GD20.ReadData();
+    sensor_LSM303DLHC.ReadData();
+}
+
+// -------------------------------------------------------------------------------
+
+// Функция для инициализации CalibrationStage
+void CalibrationStage_init(){
+    // Выключим все таймеры
+    timer3.Stop();
+    timer3.ResetCounter();
+    timer4.Stop();
+    timer4.ResetCounter();
+
+    // Включим таймер для индикации работы и оба синих светодиода 
+    leds.LedsOff();
+    leds.LedOn(LED5);
+    leds.LedOn(LED8);
+    timer4.Start();
+
+}
+
+// Функция для исполнения CalibrationStage 
+void CalibrationStage_execute(){
+
+    // Задержка, чтобы отсечь колебания установки от нажатие кнопки оператором
+    Delay(2000);
+
+    // Запустим инициализацию масштабирующего коэффициента датчиков
+    sensor_L3GD20.InitGyroScaller();
+    sensor_LSM303DLHC.InitAccScaller();
+
+    Delay(500);     // Сделаем небольшую паузу перед отправкой сообщения, чтобы ПК успел разобрать предыдущие посылки
+    send_end_of_calibration_msg();
+    program_stage_queue.put(&FooStage);
+}
+
+// -------------------------------------------------------------------------------
+
+// Функция для инициализации StaticStage
+void StaticStage_init(){
+    tick_counter = 0;
+    sensor_reading_counter = 0;
+    leds.LedsOff();
+    leds.LedOn(LED4);
+    leds.LedOn(LED9);
+    timer4.ResetCounter();
+    timer4.Start();
+}
+
+// Функция для исполнения StaticStage
+void StaticStage_execute(){
+
+    // Задержка, чтобы отсечь колебания установки от нажатие кнопки оператором
+    Delay(2000);
+
+    // Сбросим фильтры перед сбором данных
+    filter_acc.reset();
+    filter_gyro.reset();
+    filter_temp.reset();
+
+    for(int i = 0; i < InitFrameNum; i++){
+
+        /* ***************************************************************
+        * Параметры фильтров подобраны так, что все фильтры готовятся за 
+        * одинаковое число итераций, что критически важно для корректности 
+        * отработки цикла!
+        *************************************************************** */
+
+        while(!filter_acc.is_data_filtered() || !filter_gyro.is_data_filtered() || !filter_temp.is_data_filtered()){
+            // Считаем значения и добавим полученные значения в фильтры
+            sensor_L3GD20.ReadGyro();
+            filter_gyro.append_value(sensor_L3GD20.gyro_data);
+            
+            sensor_LSM303DLHC.ReadAcc();
+            filter_acc.append_value(sensor_LSM303DLHC.acc_data);
+
+            // Данные температуры будем считывать в 4 раза реже
+            if (sensor_reading_counter++ % 4 == 0) {
+                sensor_LSM303DLHC.ReadTemp();
+                filter_temp.append_value(sensor_LSM303DLHC.temperature);
+            }
+        }
+
+        // Обновим данные с датчиков
+        acc_value = filter_acc.get_filtered_data();
+        gyro_value = filter_gyro.get_filtered_data();
+        temp_value = filter_temp.get_filtered_data();
+
+        // Обновим данные в посылке и отправим её по com-порту
+        telega_package.UpdateData();
+        telega_package.UpdateControlSum();
+        com_port.SendPackage(telega_package);
+
+        // Сбросим фильтры
+        filter_acc.reset();
+        filter_gyro.reset();
+        filter_temp.reset();
+    }
+
+    // В конце отправим сообщение об окончании выставки
+    Delay(500);     // Сделаем небольшую паузу перед отправкой сообщения, чтобы ПК успел разобрать предыдущие посылки
+    send_end_of_static_init_msg();
+    program_stage_queue.put(&FooStage);
+}
+
+// -------------------------------------------------------------------------------
+
+// Функция для инициализации MeasuringStage
+void MeasuringStage_init(){
+    tick_counter = 0;
+    sensor_reading_counter = 0;
+    leds.LedsOff();
+    // Запустим таймер сбора данных с частотой 4 Гц
+    timer3.ResetCounter();
+    timer3.Start();
+    // Запустим таймер индикации работы
+    timer4.ResetCounter();
+    timer4.Start();
+}
+
+// Функция для исполнения MeasuringStage 
+void MeasuringStage_execute(){
+    leds.ChangeLedStatus(LED9);
+
+    if (timer_tick_flag){
+
+        /* ***********************************************************************
+        * ВАЖНО! Длительность выполнения этой стадии не должна превышать 200мс
+        * для обеспечения выдачи данных с частотой 4 Гц. Длительность выполнения
+        * можно менять с помощью шаблонных параметров NSigmaFilter.
+        *********************************************************************** */
+
+        leds.LedOn(LED5);
+
+        while(!filter_acc.is_data_filtered() || !filter_gyro.is_data_filtered() || !filter_temp.is_data_filtered()){
+            // Считаем значения и добавим полученные значения в фильтры
+            sensor_L3GD20.ReadGyro();
+            filter_gyro.append_value(sensor_L3GD20.gyro_data);
+
+            sensor_LSM303DLHC.ReadAcc();
+            filter_acc.append_value(sensor_LSM303DLHC.acc_data);
+
+            // Данные температуры будем считывать в 4 раза реже
+            if (sensor_reading_counter++ % 4 == 0) {
+                sensor_LSM303DLHC.ReadTemp();
+                filter_temp.append_value(sensor_LSM303DLHC.temperature);
+            }
+        }
+
+        // Обновим данные с датчиков
+        acc_value = filter_acc.get_filtered_data();
+        gyro_value = filter_gyro.get_filtered_data();
+        temp_value = filter_temp.get_filtered_data();
+
+        // Обновим данные в посылке и отправим её по com-порту
+        telega_package.UpdateData();
+        telega_package.UpdateControlSum();
+        com_port.SendPackage(telega_package);
+
+        // Сбросим фильтры
+        filter_acc.reset();
+        filter_gyro.reset();
+        filter_temp.reset();
+
+        leds.LedOff(LED5);
+        timer_tick_flag = false;
+    }
+}
+
+// -------------------------------------------------------------------------------
 // Функции для отработки поступивших команд
 // -------------------------------------------------------------------------------
 
 void UserEP3_OUT_Callback(uint8_t *buffer){
-    STM_CppLib::Message message(buffer);
+    Messages::SizedMessage<VCP_BUFFER_SIZE> message(buffer, VCP_BUFFER_SIZE);
     com_port.EP3_OUT_Callback(message);
 }
 
@@ -360,48 +478,61 @@ void restart(){
     NVIC_SystemReset();
 }
 
-void start_InitialSetting(){
-    stage = ProgramStages::InitialSetting;
+void set_FooStage(){
+    program_stage_queue.put(&FooStage);
 }
 
-void start_Measuring(){
-    stage = ProgramStages::Measuring;
+void set_CalibrationStage(){
+    program_stage_queue.put(&CalibrationStage);
 }
 
-void stop_Measuring(){
-    stage = ProgramStages::FooStage;
+void set_StaticStage(){
+    program_stage_queue.put(&StaticStage);;
 }
 
-void stop_CollectingData(){
-    stage = ProgramStages::FooStage;
+void set_MeasureStage(){
+    program_stage_queue.put(&MeasuringStage);
 }
 
 // -------------------------------------------------------------------------------
 // Отправка предопределённых сообщений
 // -------------------------------------------------------------------------------
 
+
 void send_confirm_msg(){
-    constexpr uint8_t ConfirmMessage[MessageLen] = {0x7e, 0xe7, 0xff, 0xaa, 0xaa, 0xb8, 0};
-    STM_CppLib::Message message(ConfirmMessage, MessageLen);
-    com_port.SendMessage(message);   // В таком случае передаём lvalue ссылку
+    const char* text = "CONFIRM_RECEIVED_COMMAND";
+    Packages::MessagePackage msg_package(text, strlen(text));
+    com_port.SendPackage(msg_package);
 }
 
-void send_hello_msg(){
-    const char* text = "STM_Telega by Romanovskiy Roma\n";
-    STM_CppLib::Message message(reinterpret_cast<const uint8_t*>(text), strlen(text));
-    com_port.SendMessage(message);
+void send_handshake_ack(){
+    const char* text = "TELEGA_STM32_ACK";
+    Packages::MessagePackage msg_package(text, strlen(text));
+    com_port.SendPackage(msg_package);
+}
+
+void send_heartbeat_ack(){
+    const char* text = "TELEGA_STM32_ALIVE";
+    Packages::MessagePackage msg_package(text, strlen(text));
+    com_port.SendPackage(msg_package);
 }
 
 void send_error_msg(){
-    constexpr uint8_t ErrorMessage[MessageLen] = {0x7e, 0xe7, 0xff, 0xff, 0xff, 0x62, 0};
-    STM_CppLib::Message message(ErrorMessage, MessageLen);
-    com_port.SendMessage(message);
+    const char* text = "UNKNOWN_COMMAND";
+    Packages::MessagePackage msg_package(text, strlen(text));
+    com_port.SendPackage(msg_package);
 }
 
-void send_end_of_initial_setting_msg(){
-    constexpr uint8_t EndOfInitialSettingMessage[MessageLen] = {0x7e, 0xe7, 0xff, 0xba, 0xab, 0xc9, 0};
-    STM_CppLib::Message message(EndOfInitialSettingMessage, MessageLen);
-    com_port.SendMessage(message);
+void send_end_of_calibration_msg(){
+    const char* text = "END_OF_CALIBRATION";
+    Packages::MessagePackage msg_package(text, strlen(text));
+    com_port.SendPackage(msg_package);
+}
+
+void send_end_of_static_init_msg(){
+    const char* text = "END_OF_STATIC_INIT";
+    Packages::MessagePackage msg_package(text, strlen(text));
+    com_port.SendPackage(msg_package);
 }
 
 // -------------------------------------------------------------------------------

@@ -1,3 +1,18 @@
+/** ****************************************************************************
+ * @file    Exti.hpp
+ * @author  Романовский Роман
+ * @brief   Шаблонные классы для работы с внешними прерываниями (EXTI) STM32F30x
+ *
+ * @details Предоставляет:
+ *          - шаблонный дескриптор EXTI_Descriptor, обеспечивающий на этапе
+ *            компиляции статический доступ к параметрам линии EXTI
+ *            (номер прерывания IRQn и идентификатор источника порта);
+ *          - шаблонный класс GPIO_EXTI для настройки линии EXTI и
+ *            программного инициирования прерывания.
+ *          Оба класса параметризованы портом и номером вывода,
+ *          что обеспечивает типобезопасность и минимальные накладные расходы.
+ **************************************************************************** */
+
 /* Define to prevent recursive inclusion -------------------------------------*/
 #ifndef __EXTI_HPP
 #define __EXTI_HPP
@@ -20,9 +35,31 @@
 namespace STM_CppLib{
     namespace STM_EXTI{ 
 
+    /**
+     * @brief   Шаблонный дескриптор для получения статической информации о линии EXTI.
+     * @tparam  port        Порт GPIO (значение перечисления GPIO_Port).
+     * @tparam  pin_source  Номер вывода (0..15).
+     *
+     * @details Позволяет на этапе компиляции получить:
+     *          - номер прерывания IRQn, соответствующий линии EXTI;
+     *          - идентификатор источника порта PortSource для функции
+     *            SYSCFG_EXTILineConfig.
+     *          На STM32F30x линии EXTI 0..4 имеют собственные векторы прерываний
+     *          (EXTI0_IRQn..EXTI4_IRQn), линии 5..9 объединены в один вектор
+     *          EXTI9_5_IRQn, линии 10..15 – в EXTI15_10_IRQn.
+     * @note    Линия EXTI2 на STM32F30x объединена с прерыванием Touch Sensing
+     *          (EXTI2_TS_IRQn).
+     */
     template <STM_GPIO::GPIO_Port port, uint8_t pin_source>
     class EXTI_Descriptor{
     public:
+        /**
+         * @brief   Номер прерывания, соответствующий линии EXTI.
+         * @details Вычисляется по шаблонному параметру pin_source:
+         *          - 0..4   – индивидуальные векторы EXTI0_IRQn..EXTI4_IRQn;
+         *          - 5..9   – общий вектор EXTI9_5_IRQn;
+         *          - 10..15 – общий вектор EXTI15_10_IRQn.
+         */
         static constexpr IRQn_Type IRQn = [](){
         switch (pin_source) {
             case GPIO_PinSource0: return EXTI0_IRQn;
@@ -43,6 +80,11 @@ namespace STM_CppLib{
             }
         }();
 
+        /**
+         * @brief   Идентификатор источника порта для SYSCFG_EXTILineConfig.
+         * @details Возвращает значение EXTI_PortSourceGPIOA..GPIOF в зависимости
+         *          от шаблонного параметра port.
+         */
         static constexpr uint8_t PortSource = [](){
             switch(port) {
                 case STM_GPIO::GPIO_Port::PortA: return EXTI_PortSourceGPIOA;
@@ -55,10 +97,33 @@ namespace STM_CppLib{
         }();
     };
     
-    // Класс для работы с EXTI
+    /**
+     * @brief   Шаблонный класс для настройки линии EXTI.
+     * @tparam  EXTI_PortSourceGPIOx   Идентификатор источника порта
+     *                                 (EXTI_PortSourceGPIOA..GPIOF).
+     * @tparam  EXTI_PinSourcex        Номер вывода, соответствующий линии EXTI (0..15).
+     *
+     * @details Предоставляет методы настройки одной линии EXTI и программного
+     *          инициирования прерывания. Используется как базовый класс в
+     *          GPIO_Pin_EXTI, но может применяться и самостоятельно.
+     * @note    Для корректной работы перед вызовом InitExti необходимо включить
+     *          тактирование SYSCFG (обычно выполняется в инициализации GPIO
+     *          через RCC_AHBPeriphClockCmd).
+     */
     template<uint8_t EXTI_PortSourceGPIOx, uint8_t EXTI_PinSourcex>
     class GPIO_EXTI{
     public:
+        /**
+         * @brief   Инициализация линии EXTI.
+         * @param   EXTI_InitStructure_ptr   Указатель на пользовательскую
+         *                                   структуру настройки EXTI. Если nullptr,
+         *                                   используется конфигурация по умолчанию:
+         *                                   режим прерывания, срабатывание по
+         *                                   нарастающему фронту, линия разрешена.
+         * @details Сначала вызывает SYSCFG_EXTILineConfig для связывания
+         *          выбранного порта с линией EXTI, затем вызывает EXTI_Init
+         *          с переданной или сгенерированной структурой настройки.
+         */
         void InitExti(EXTI_InitTypeDef* EXTI_InitStructure_ptr = nullptr){
             
             // Select the input source pin for the EXTI line
@@ -75,9 +140,22 @@ namespace STM_CppLib{
             }
             else{   EXTI_Init(EXTI_InitStructure_ptr);    }
         }
+
+        /**
+         * @brief   Программное инициирование прерывания EXTI.
+         * @details Устанавливает соответствующий бит в регистре EXTI->SWIER,
+         *          что вызывает срабатывание прерывания EXTI на данной линии
+         *          так, как будто произошло аппаратное событие. Номер линии
+         *          соответствует шаблонному параметру EXTI_PinSourcex.
+         * @note    Линия EXTI должна быть предварительно настроена (InitExti)
+         *          и разрешена, иначе прерывание не сработает.
+         */
+        void GenerateSWInterrupt(){
+            EXTI_GenerateSWInterrupt(static_cast<uint32_t>(EXTI_PinSourcex));
+        }
     };
 
-    } // namespace EXTI   
+    } // namespace STM_EXTI
 } // namespace STM_CppLib
 
 

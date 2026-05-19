@@ -62,8 +62,12 @@ namespace STM_CppLib{
         // Инициализация датчиков
         void Init(){
             AccInit();
+        #ifdef USE_MAGNETIC_SENSOR
             MagInit();
+        #endif /*   USE_MAGNETIC_SENSOR   */
+        }
 
+        void InitAccScaller(){
             // Вычислим масштабирующий коэффициент для ускорения
             SensorScaller<LSM303DLHC> acc_scaller{this, &acc_data, TrueMoscowAcc};
             acc_scaller.Init();
@@ -73,6 +77,7 @@ namespace STM_CppLib{
     private:
         // Инициализация акселерометра
         void AccInit(){
+
             // ----------------------------------------------------------------
             // Структуры для конфигурации
             LSM303DLHCAcc_InitTypeDef AInitStruct;
@@ -81,9 +86,9 @@ namespace STM_CppLib{
             // ----------------------------------------------------------------
             // Сконфигурируем параметры акселерометра
             AInitStruct.Power_Mode = LSM303DLHC_NORMAL_MODE;                    // NORMAL or LOWPOWER MODE (CTRL_REG1 ODR[3])
-            AInitStruct.AccOutput_DataRate = LSM303DLHC_ODR_400_HZ;             // output data rate				(CTRL_REG1) //400Hz - less zero values
+            AInitStruct.AccOutput_DataRate = LSM303DLHC_ODR_200_HZ;             // output data rate         (CTRL_REG1)
             AInitStruct.Axes_Enable = LSM303DLHC_AXES_ENABLE;                   // enable x, y and z axes	(CTRL_REG1)
-            AInitStruct.AccFull_Scale = LSM303DLHC_FULLSCALE_4G;                // full scale (CTRL_REG4)
+            AInitStruct.AccFull_Scale = LSM303DLHC_FULLSCALE_2G;                // full scale               (CTRL_REG4)
             AInitStruct.BlockData_Update = LSM303DLHC_BlockUpdate_Continous;    // Block data update. Default value: 0; (0: continuous update, 1: output registers not updated until MSB and LSB have been read (CTRL_REG4)
             AInitStruct.Endianness = LSM303DLHC_BLE_LSB;                        // Little Endian: data LSB @ lower address
             AInitStruct.High_Resolution = LSM303DLHC_HR_ENABLE;                 // Acc high resolution enabled
@@ -145,8 +150,10 @@ namespace STM_CppLib{
             
         }
 
+        #ifdef USE_MAGNETIC_SENSOR
         // Инициализация магнитометра
         void MagInit(){
+
             // ----------------------------------------------------------------
             // Структура для конфигурации
             LSM303DLHCMag_InitTypeDef InitStruct;
@@ -160,7 +167,6 @@ namespace STM_CppLib{
 
             LSM303DLHC_MagInit(&InitStruct);
     
-        #ifdef USE_MAGNETIC_SENSOR
             // ----------------------------------------------------------------
             // Установим чувствительность магнитометра
             switch (InitStruct.MagFull_Scale)
@@ -194,8 +200,8 @@ namespace STM_CppLib{
                 Mag_Sensitivity_Z = LSM303DLHC_M_SENSITIVITY_Z_8_1Ga;
                 break;
             }            
-        #endif /*   USE_MAGNETIC_SENSOR   */
         }
+        #endif /*   USE_MAGNETIC_SENSOR   */
 
         // ------------------------------
         // Чтение данных датчиков
