@@ -1,11 +1,21 @@
+"""Простой трехмерный вектор для наглядной записи алгоритма."""
+
+# System imports
+from collections.abc import Iterable
+from typing import Union
+
+# External imports
 import numpy as np
+
+##########################################################
 
 
 class Vector:
     """
     Класс, предназначенный для работы с вектором, имеющий три компоненты
     """
-    def __init__(self, coords: list[np.floating | float]):
+    def __init__(self, coords: Iterable[Union[np.floating, float]]):
+        coords = list(coords)
         if len(coords) != 3:
             raise RuntimeError('Incorrect dimension of the vector.'
                                f'The Vector type have 3 dimensions, but given {len(coords)}')
@@ -77,6 +87,8 @@ class Vector:
             self._Z_coord * _multiplier
         ])
 
+    __rmul__ = __mul__
+
     def __imul__(self, multiplier):
         try:
             _multiplier = float(multiplier)
@@ -113,7 +125,7 @@ class Vector:
     def __len__(self):
         return 3
 
-    def __getitem__(self, item: int | str):
+    def __getitem__(self, item: Union[int, str]):
         if isinstance(item, int):
             return self.to_list()[item]
 
@@ -154,6 +166,9 @@ class Vector:
     def __str__(self):
         return f"X_coord = {round(self._X_coord, 6)}, Y_coord = {round(self._Y_coord, 6)}, Z_coord = {round(self._Z_coord, 6)}"
 
+    def __repr__(self):
+        return f"Vector([{self._X_coord:.6f}, {self._Y_coord:.6f}, {self._Z_coord:.6f}])"
+
     # -------------------------------
     # Метод для приведения к dict
     def to_dict(self):
@@ -167,3 +182,5 @@ class Vector:
     def to_list(self):
         return [self._X_coord, self._Y_coord, self._Z_coord]
 
+    def to_numpy(self) -> np.ndarray:
+        return np.array(self.to_list(), dtype=float)
