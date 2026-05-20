@@ -8,8 +8,8 @@
  *************************************************************************** */
 
 /* Define to prevent recursive inclusion -------------------------------------*/
-#ifndef DATA_FRAME_HPP
-#define DATA_FRAME_HPP
+#ifndef TRIAXIAL_DATA_HPP
+#define TRIAXIAL_DATA_HPP
 
 /* Includes ------------------------------------------------------------------*/
 #include <cmath>
@@ -39,6 +39,12 @@ public:
      * @brief Конструктор по умолчанию, инициализирует координаты нулями 
      */
     TriaxialData(): x_coord(0), y_coord(0), z_coord(0) {}
+
+    /** 
+     * @brief Конструктор с заданным общим значением для координат
+     * @param val Общее значение координат
+     */
+    TriaxialData(float val): x_coord(val), y_coord(val), z_coord(val) {}
     
     /** 
      * @brief Конструктор с заданными координатами
@@ -230,4 +236,4 @@ public:
     bool operator!=(const TriaxialData& other) const { return !(*this == other); }
 };
 
-#endif /*   DATA_FRAME_HPP   */
+#endif /*   TRIAXIAL_DATA_HPP   */

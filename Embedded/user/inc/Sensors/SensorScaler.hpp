@@ -22,7 +22,7 @@
 #include "TriaxialData.hpp"
 
 /* Defines -------------------------------------------------------------------*/
-#define BUFFER_SIZE     1000
+#define BUFFER_SIZE     10000
 
 /* Global variables ----------------------------------------------------------*/
 

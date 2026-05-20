@@ -17,30 +17,12 @@
 #include "TriaxialData.hpp"
 
 /* Defines -------------------------------------------------------------------*/
-/**
- * @def     HeaderFirstByte
- * @brief   Первый байт заголовка пакета
- */
-#define HeaderFirstByte     0x7E
-
-/**
- * @def     HeaderSecondByte
- * @brief   Второй байт заголовка пакета
- */
-#define HeaderSecondByte    0xE7
-
-/**
- * @def     Format
- * @brief   Байт формата пакета
- */
-#define Format              0xC8
 
 /* Global variables ----------------------------------------------------------*/
 
 // -----------------------------------------------------------------------------
 
-namespace STM_CppLib{
-    namespace STM_Packages{
+namespace Packages{
 
     /**
      * @brief   Класс пакета данных для протокола "Гиронавт".
@@ -49,16 +31,24 @@ namespace STM_CppLib{
      */
     class TelegaPackage: public BasePackage{
     private:
+        /**
+         * @def     DataFormat
+         * @brief   Байт формата пакета
+         */
+        static constexpr uint8_t DataFormat = 0xC8;
+
+        uint32_t* time_ptr;             ///< Указатель на внешний счётчик таймера
         TriaxialData* acc_data_ptr;     ///< Указатель на внешние данные акселерометра
         TriaxialData* gyro_data_ptr;    ///< Указатель на внешние данные гироскопа
         float* temp_data_ptr;           ///< Указатель на внешнее значение температуры
+        int32_t* dpp_code_ptr;          ///< Указатель на внешнее значение кода ДПП
 
         /**
          * @brief   Внутренняя структура пакета (упакована без выравнивания).
          * @details Соответствует формату протокола путеизмерительной телеги. Поля:
          *          - header[4]:  фиксированный заголовок (первые три байта константы,
          *                        четвёртый байт – длина полезных данных);
-         *          - time:       16-битная временная метка;
+         *          - time:       32-битный счётчик пакетов;
          *          - acc_data:   данные акселерометра (TriaxialData);
          *          - gyro_data:  данные гироскопа (TriaxialData);
          *          - temp:       температура (float);
@@ -67,13 +57,20 @@ namespace STM_CppLib{
         #pragma pack(1)
         struct package_body_t
         {
-            uint8_t header[4] = {HeaderFirstByte, HeaderSecondByte, Format, 0};
+            uint8_t header[4] = {BasePackage::HeaderFirstByte, 
+                                 BasePackage::HeaderSecondByte, 
+                                 DataFormat, 0};
             uint32_t time = 0;
             TriaxialData acc_data, gyro_data;
             float temp;
+            int32_t dpp_code;
             uint8_t control_sum = 0;
         } package_body;
         #pragma pack()
+
+        static_assert(sizeof(package_body_t) <= 64,
+            "TelegaPackage: structure package_body_t exceeds 64 bytes.\n"
+            "Either increase the buffer size in hw_config.c or reduce the structure size.");
 
     public:
         /**
@@ -83,18 +80,23 @@ namespace STM_CppLib{
 
         /**
          * @brief   Конструктор с указателями на внешние данные.
+         * @param   _acc_data_ptr   Указатель на объект uint32_t для времени.
          * @param   _acc_data_ptr   Указатель на объект TriaxialData для акселерометра.
          * @param   _gyro_data_ptr  Указатель на объект TriaxialData для гироскопа.
          * @param   _temp_data_ptr  Указатель на float для температуры.
+         * @param   _dpp_code_ptr   Указатель на int32_t для кода ДПП.
          * @note    Переданные указатели должны оставаться валидными на всём
          *          протяжении использования объекта TelegaPackage.
          */
-        TelegaPackage(TriaxialData* _acc_data_ptr, TriaxialData* _gyro_data_ptr, float* _temp_data_ptr):
-            acc_data_ptr(_acc_data_ptr), gyro_data_ptr(_gyro_data_ptr), temp_data_ptr(_temp_data_ptr){
-
+        TelegaPackage(
+            uint32_t* _time_ptr, TriaxialData* _acc_data_ptr, 
+            TriaxialData* _gyro_data_ptr, float* _temp_data_ptr, int32_t* _dpp_code_ptr
+        ):
+            time_ptr(_time_ptr), acc_data_ptr(_acc_data_ptr), 
+            gyro_data_ptr(_gyro_data_ptr), temp_data_ptr(_temp_data_ptr), dpp_code_ptr(_dpp_code_ptr)
+        {
             // Последним байтом заголовка необходимо задать длину полезных данных:
-            // sizeof(time) + 2*sizeof(TriaxialData) + sizeof(float)
-            package_body.header[3] = sizeof(uint16_t) + 2 * sizeof(TriaxialData) + sizeof(float);
+            package_body.header[3] = sizeof(package_body) - sizeof(package_body.header) - sizeof(package_body.control_sum);
             
             len = sizeof(package_body);                             ///< Общая длина пакета
             data_ptr = reinterpret_cast<uint8_t*>(&package_body);   ///< Указатель на начало пакета
@@ -105,17 +107,11 @@ namespace STM_CppLib{
          * @details Копирует текущие значения из внешних объектов во внутреннюю структуру.
          */
         void UpdateData() {
+            package_body.time = *time_ptr;
             package_body.acc_data = *acc_data_ptr;
             package_body.gyro_data = *gyro_data_ptr;
             package_body.temp = *temp_data_ptr;
-        }
-
-        /**
-         * @brief   Обновить временную метку пакета.
-         * @param   new_time   Новое значение времени.
-         */
-        void UpdateTime(uint32_t new_time){
-            package_body.time = new_time;
+            package_body.dpp_code = *dpp_code_ptr;
         }
 
         /**
@@ -143,7 +139,6 @@ namespace STM_CppLib{
         }        
     };
 
-    } // namespace STM_Packages
-} // namespace STM_CppLib
+} // namespace Packages
 
 #endif /*   TELEGA_PACKAGE_HPP   */

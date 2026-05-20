@@ -1,14 +1,43 @@
-# KiCad ignore 
-KiCad/Telega_KiCad-backups/
+# KiCad ignore
 KiCad/Telega_KiCad-backups/
 
-# Python ignore
+# IDE and editor files
 .idea/
-*.pyc
+.vscode/
+
+# Python virtual environments
+.venv/
+venv/
+env/
+
+# Python cache and build artifacts
+**/__pycache__/**
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+*.egg-info/
+
+# Local application configuration
+**/settings.json
+
+# Logs and profiling output
+*.log
+*.log.bkp
+
+# Runtime data and measurement results
+results/
+*.csv
+*.bin
+Измерения/
 
 # Embedded ignore
 Embedded/archive/
-
 Embedded/Debug_Win/
 
-Измерения/
+# OS metadata
+Thumbs.db
+Desktop.ini

@@ -25,7 +25,6 @@
 #include "stm32f30x_misc.h"
 #include "stm32f30x_tim.h"
 
-#include "Periphery.hpp"
 #include "TimerConfig.hpp"
 
 /* Defines -------------------------------------------------------------------*/
@@ -42,7 +41,7 @@ namespace STM_CppLib{
      * @brief   Перечисление доступных таймеров.
      * @details Timer1 – расширенный таймер (advanced), Timer2–Timer4 – общего назначения.
      */
-    enum class TimerTypes {Timer1, Timer2, Timer3, Timer4};
+    enum class TimerTypes {Timer1, Timer2, Timer3, Timer4, Timer6, Timer7};
 
     /**
      * @brief   Шаблонный дескриптор для получения статической информации о таймере.
@@ -70,6 +69,8 @@ namespace STM_CppLib{
                 case TimerTypes::Timer2: return TIM2;
                 case TimerTypes::Timer3: return TIM3;
                 case TimerTypes::Timer4: return TIM4;
+                case TimerTypes::Timer6: return TIM6;
+                case TimerTypes::Timer7: return TIM7;
                 default: return nullptr;
             }
         };
@@ -84,6 +85,8 @@ namespace STM_CppLib{
                 case TimerTypes::Timer2: return TIM2_IRQn;
                 case TimerTypes::Timer3: return TIM3_IRQn;
                 case TimerTypes::Timer4: return TIM4_IRQn;
+                case TimerTypes::Timer6: return TIM6_DAC_IRQn;
+                case TimerTypes::Timer7: return TIM7_IRQn;
             }
         }();
 
@@ -99,6 +102,8 @@ namespace STM_CppLib{
                 case TimerTypes::Timer2: return RCC_APB1Periph_TIM2;
                 case TimerTypes::Timer3: return RCC_APB1Periph_TIM3;
                 case TimerTypes::Timer4: return RCC_APB1Periph_TIM4;
+                case TimerTypes::Timer6: return RCC_APB1Periph_TIM6;
+                case TimerTypes::Timer7: return RCC_APB1Periph_TIM7;
             }
         }();
     };
