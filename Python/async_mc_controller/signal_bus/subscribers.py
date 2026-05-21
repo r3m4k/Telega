@@ -1,0 +1,367 @@
+# -*- coding: utf-8 -*-
+"""Модуль протоколов подписчиков сигнальной шины.
+
+Каждый протокол описывает контракт объекта, который может быть подписан
+на конкретный сигнал через McBus. Протокол фиксирует имя метода и его
+сигнатуру — линтер проверяет соответствие при передаче объекта в McBus.
+
+Соглашение об именовании:
+    - Протокол: <ИмяСигнала>Subscriber
+    - Метод:    on_<имя_сигнала_в_snake_case>
+
+Добавление нового сигнала:
+    1. Добавить значение в Signals (signals.py)
+    2. Добавить протокол в этот файл
+    3. Добавить методы subscribe/unsubscribe/emit в McBus (mc_bus.py)
+    4. Экспортировать протокол в __init__.py
+"""
+
+# System imports
+from typing import Protocol
+
+# External imports
+
+# User imports
+from async_mc_controller.byte_source.read_error import ReadError
+
+#########################
+
+
+class NewByteSubscriber(Protocol):
+    """Протокол подписчика сигнала Signals.NEW_BYTE.
+
+    Любой объект, реализующий метод on_byte_received, может быть
+    передан в McBus.new_byte.subscribe().
+
+    Пример реализации:
+        class Decoder:
+            async def on_byte_received(self, bt: bytes) -> None:
+                self._queue.put_nowait(bt)
+    """
+    async def on_byte_received(self, bt: bytes) -> None: ...
+
+
+# ------------------------------------------
+
+class PackageReadySubscriber(Protocol):
+    """Протокол подписчика сигнала Signals.PACKAGE_READY.
+
+    Любой объект, реализующий метод on_package_ready, может быть
+    передан в McBus.package_ready.subscribe().
+
+    Пример реализации:
+        class Controller:
+            async def on_package_ready(self, data: ImuData) -> None:
+                self._received_data.append(data)
+    """
+    async def on_package_ready(self, data) -> None: ...
+
+
+# ------------------------------------------
+
+class StopExecutingSubscriber(Protocol):
+    """Протокол подписчика сигнала Signals.STOP_EXECUTING.
+
+    Любой объект, реализующий метод on_stop_executing, может быть
+    передан в McBus.stop_executing.subscribe().
+
+    Пример реализации:
+        class AsyncComPort:
+            async def on_stop_executing(self) -> None:
+                self._close_com_port()
+    """
+    async def on_stop_executing(self) -> None: ...
+
+# ------------------------------------------
+
+class StartMeasuringSubscriber(Protocol):
+    """Протокол подписчика сигнала Signals.START_MEASURING.
+
+    Любой объект, реализующий метод on_start_measuring, может быть
+    передан в McBus.start_measuring.subscribe().
+
+    Пример реализации:
+        class AsyncComPort:
+            async def on_start_measuring(self) -> None:
+                self._reading_task = asyncio.create_task(self.reading_loop())
+    """
+    async def on_start_measuring(self) -> None: ...
+
+
+# ------------------------------------------
+
+class StopMeasuringSubscriber(Protocol):
+    """Протокол подписчика сигнала Signals.STOP_MEASURING.
+
+    Любой объект, реализующий метод on_stop_measuring, может быть
+    передан в McBus.stop_measuring.subscribe().
+
+    Пример реализации:
+        class AsyncComPort:
+            async def on_stop_measuring(self) -> None:
+                self._reading_task.cancel()
+    """
+    async def on_stop_measuring(self) -> None: ...
+
+# ------------------------------------------
+
+class StartCalibrationSubscriber(Protocol):
+    """Протокол подписчика сигнала Signals.START_CALIBRATION.
+
+    Любой объект, реализующий метод on_start_calibration, может быть
+    передан в McBus.start_calibration.subscribe().
+
+    Пример реализации:
+        class ComPortTelega:
+            async def on_start_calibration(self) -> None:
+                self._telega_mc_logger.debug('Начало калибровки')
+                await self._send_command_with_ack(self._set_calibration_stage_command)
+    """
+    async def on_start_calibration(self) -> None: ...
+
+# ------------------------------------------
+
+class StopCalibrationSubscriber(Protocol):
+    """Протокол подписчика сигнала Signals.STOP_CALIBRATION.
+
+    Любой объект, реализующий метод on_stop_calibration, может быть
+    передан в McBus.stop_calibration.subscribe().
+
+    Пример реализации:
+        class ComPortTelega:
+            async def on_stop_calibration(self) -> None:
+                self._telega_mc_logger.debug('Завершение калибровки')
+                await self._send_command_with_ack(self._set_foo_stage_command)
+    """
+    async def on_stop_calibration(self) -> None: ...
+
+# ------------------------------------------
+
+class StartStaticInitSubscriber(Protocol):
+    """Протокол подписчика сигнала Signals.START_STATIC_INIT.
+
+    Любой объект, реализующий метод on_start_static_init, может быть
+    передан в McBus.start_static_init.subscribe().
+
+    Пример реализации:
+        class ComPortTelega:
+            async def on_start_static_init(self) -> None:
+                self._telega_mc_logger.debug('Начало набора статического буфера')
+                await self._send_command_with_ack(self._set_static_init_stage_command)
+    """
+    async def on_start_static_init(self) -> None: ...
+
+# ------------------------------------------
+
+class StopStaticInitSubscriber(Protocol):
+    """Протокол подписчика сигнала Signals.STOP_STATIC_INIT.
+
+    Любой объект, реализующий метод on_stop_static_init, может быть
+    передан в McBus.stop_static_init.subscribe().
+
+    Пример реализации:
+        class ComPortTelega:
+            async def on_stop_static_init(self) -> None:
+                self._telega_mc_logger.debug('Завершение набора статического буфера')
+                await self._send_command_with_ack(self._set_foo_stage_command)
+    """
+    async def on_stop_static_init(self) -> None: ...
+
+# ------------------------------------------
+
+class InterruptMeasuringSubscriber(Protocol):
+    """Протокол подписчика сигнала Signals.INTERRUPT_MEASURING.
+
+    Эмиттится Controller при аварийном завершении работы (HANDSHAKE_FAILED,
+    DEVICE_LOST, COMMAND_ACK_TIMEOUT, COMMAND_REJECTED, READ_ERROR). В отличие
+    от STOP_MEASURING, означает «связь с МК нарушена — никаких команд ему
+    больше не посылать»: получатель должен закрыть свои ресурсы напрямую,
+    минуя протокольное взаимодействие с устройством.
+
+    Пример реализации:
+        class AsyncComPortImu:
+            async def on_interrupt_measuring(self) -> None:
+                # отменяем heartbeat, прерываем ожидание ACK,
+                # останавливаем чтение — без команд МК
+                ...
+    """
+    async def on_interrupt_measuring(self) -> None: ...
+
+
+# ------------------------------------------
+
+class ReadErrorSubscriber(Protocol):
+    """Протокол подписчика сигнала Signals.READ_ERROR.
+
+    Эмиттится AsyncComPort.reading_loop при перехвате ComPortReadError
+    (физический обрыв соединения, ошибка последовательного порта и т.п.).
+    Слушает только Controller — выставляет _force_stop и инициирует
+    INTERRUPT_MEASURING из stop().
+
+    ComPort на этот сигнал не подписан: о необходимости остановки
+    он узнаёт через INTERRUPT_MEASURING, который Controller эмиттит
+    после выхода из цикла проверки условия.
+
+    Пример реализации:
+        class Controller:
+            async def on_read_error(self, err: 'ReadError') -> None:
+                self._app_logger.critical(f'Ошибка чтения: {err} — аварийная остановка')
+                self._force_stop = True
+    """
+    async def on_read_error(self, err: 'ReadError') -> None: ...
+
+
+# ------------------------------------------
+
+class HandshakeInitSubscriber(Protocol):
+    """Протокол подписчика сигнала Signals.HANDSHAKE_INIT.
+
+    Эмиттится AsyncComPortImu в начале процедуры рукопожатия — перед
+    отправкой команды HANDSHAKE_REQ на МК. Семантически означает «начинается
+    работа с неизвестным МК»: декодер обнуляет накопленное состояние FSM,
+    счётчики и (в наследнике) накопленные данные, чтобы первый же байт
+    нового сеанса разбирался с чистого листа.
+
+    Пример реализации:
+        class BaseDecoder:
+            async def on_handshake_init(self) -> None:
+                self._clear()
+    """
+    async def on_handshake_init(self) -> None: ...
+
+
+# ------------------------------------------
+
+class HandshakeDoneSubscriber(Protocol):
+    """Протокол подписчика сигнала Signals.HANDSHAKE_DONE.
+
+    Любой объект, реализующий метод on_handshake_done, может быть
+    передан в McBus.handshake_done.subscribe().
+
+    Пример реализации:
+        class AsyncComPortImu:
+            async def on_handshake_done(self) -> None:
+                self._handshake_event.set()
+    """
+    async def on_handshake_done(self) -> None: ...
+
+
+# ------------------------------------------
+
+class HeartbeatSentSubscriber(Protocol):
+    """Протокол подписчика сигнала Signals.HEARTBEAT_SENT."""
+    async def on_heartbeat_sent(self) -> None: ...
+
+
+# ------------------------------------------
+
+class CommandSentSubscriber(Protocol):
+    """Протокол подписчика сигнала Signals.COMMAND_SENT.
+
+    Пример реализации:
+        class ImuDecoder:
+            async def on_command_sent(self) -> None:
+                self._saved_state = (...)
+                self._stage = Stage.WantHeader
+    """
+    async def on_command_sent(self) -> None: ...
+
+
+# ------------------------------------------
+
+class CommandAckSubscriber(Protocol):
+    """Протокол подписчика сигнала Signals.COMMAND_ACK.
+
+    Пример реализации:
+        class AsyncComPortImu:
+            async def on_command_ack(self) -> None:
+                self._command_ack_event.set()
+    """
+    async def on_command_ack(self) -> None: ...
+
+
+# ------------------------------------------
+
+class HeartbeatAckSubscriber(Protocol):
+    """Протокол подписчика сигнала Signals.HEARTBEAT_ACK.
+
+    Любой объект, реализующий метод on_heartbeat_ack, может быть
+    передан в McBus.heartbeat_ack.subscribe().
+
+    Пример реализации:
+        class AsyncComPortImu:
+            async def on_heartbeat_ack(self) -> None:
+                self._heartbeat_event.set()
+    """
+    async def on_heartbeat_ack(self) -> None: ...
+
+
+# ------------------------------------------
+
+class DeviceLostSubscriber(Protocol):
+    """Протокол подписчика сигнала Signals.DEVICE_LOST.
+
+    Любой объект, реализующий метод on_device_lost, может быть
+    передан в McBus.device_lost.subscribe().
+
+    Пример реализации:
+        class Controller:
+            async def on_device_lost(self) -> None:
+                self._app_logger.critical('Устройство не отвечает')
+    """
+    async def on_device_lost(self) -> None: ...
+
+
+# ------------------------------------------
+
+class HandshakeFailedSubscriber(Protocol):
+    """Протокол подписчика сигнала Signals.HANDSHAKE_FAILED.
+
+    Любой объект, реализующий метод on_handshake_failed, может быть
+    передан в McBus.handshake_failed.subscribe().
+
+    Пример реализации:
+        class Controller:
+            async def on_handshake_failed(self) -> None:
+                self._app_logger.error('Рукопожатие не выполнено — завершение программы')
+    """
+    async def on_handshake_failed(self) -> None: ...
+
+
+# ------------------------------------------
+
+class CommandAckTimeoutSubscriber(Protocol):
+    """Протокол подписчика сигнала Signals.COMMAND_ACK_TIMEOUT.
+
+    Эмиттится AsyncComPortImu когда МК не прислал подтверждение команды
+    за отведённое время. В отличие от HEARTBEAT_SENT/ACK, потеря одного
+    подтверждения команды не обязательно означает потерю устройства —
+    подписчик решает сам, как на это реагировать.
+
+    Пример реализации:
+        class Controller:
+            async def on_command_ack_timeout(self) -> None:
+                self._app_logger.error('МК не подтвердил команду — остановка')
+                self._force_stop = True
+    """
+    async def on_command_ack_timeout(self) -> None: ...
+
+
+# ------------------------------------------
+
+class CommandRejectedSubscriber(Protocol):
+    """Протокол подписчика сигнала Signals.COMMAND_REJECTED.
+
+    Эмиттится ImuDecoder при получении от МК сообщения 'UNKNOWN_COMMAND' —
+    МК не распознал отправленную ПК команду. Семантически это третий исход
+    команды (наряду с COMMAND_ACK и COMMAND_ACK_TIMEOUT) — «программная
+    ошибка контракта ПК↔МК». В проде такой ситуации быть не должно,
+    но для отладки сигнал критически важен.
+
+    Пример реализации:
+        class Controller:
+            async def on_command_rejected(self) -> None:
+                self._app_logger.critical('МК отверг команду — аварийная остановка')
+                self._force_stop = True
+    """
+    async def on_command_rejected(self) -> None: ...
