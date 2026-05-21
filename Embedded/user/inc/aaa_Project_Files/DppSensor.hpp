@@ -33,12 +33,13 @@ namespace Dpp
      *          - PinDirection == 0: dpp_code увеличивается;
      *          - PinDirection == 1: dpp_code уменьшается.
      */
-    template <STM_CppLib::STM_GPIO::GpioPinExtiConcept PinPulse,
+    template <STM_CppLib::STM_GPIO::GpioPinConcept PinPulse,
               STM_CppLib::STM_GPIO::GpioPinConcept PinDirection>
     class DppSensor{
     private:
         PinPulse pin_pulse;            ///< Вход импульсов ДПП
         PinDirection pin_direction;    ///< Вход направления движения
+        uint8_t prev_state = Bit_SET;   // Прошлое состояние pin_pulse
 
     public:
         int32_t dpp_code;              ///< Текущий код пройденного пути
@@ -59,8 +60,9 @@ namespace Dpp
          *          вход направления - как обычный GPIO-вход.
          */
         void Init(){
-            pin_pulse.InitPinExti(GPIO_Mode_IN, GPIO_PuPd_NOPULL);
-            pin_direction.InitPin(GPIO_Mode_IN, GPIO_PuPd_NOPULL);
+            pin_pulse.InitPin(GPIO_Mode_IN, GPIO_PuPd_UP);
+            pin_direction.InitPin(GPIO_Mode_IN, GPIO_PuPd_UP);
+            prev_state = pin_pulse.ReadPin();  // Запоминаем начальное состояние
         }
 
         /**
@@ -68,11 +70,17 @@ namespace Dpp
          * @details Метод должен вызываться из обработчика EXTI входа PinPulse.
          */
         void process_front(){
-            if (pin_direction.ReadPin() == Bit_RESET){
-                dpp_code++;
-            }
-            else{
-                dpp_code--;
+            uint8_t current_state = pin_pulse.ReadPin();
+            bool state_changed = (current_state != prev_state);
+            prev_state = current_state;
+
+            if (state_changed && (current_state == Bit_SET)){
+                if (pin_direction.ReadPin() == Bit_RESET){
+                    dpp_code++;
+                }
+                else{
+                    dpp_code--;
+                }
             }
         }
 
