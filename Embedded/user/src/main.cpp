@@ -83,6 +83,12 @@ STM_CppLib::UsbPort::UsbPort com_port;
 
 // Используемые таймеры -------------------------------------------------------
 
+// Таймер для опроса ДПП
+STM_CppLib::STM_Timer::Timer2<[](){
+    /* Объявление лямбды, которая будет вызываться в прерывании */
+    dpp_irq_handler();
+}>  timer2;
+
 // Таймер для чтения данных
 STM_CppLib::STM_Timer::Timer3<[](){
     /* Объявление лямбды, которая будет вызываться в прерывании */
@@ -112,8 +118,8 @@ STM_CppLib::LSM303DLHC  sensor_LSM303DLHC;      // Встроенный датч
                                                 // магнитным и температурным датчиками
 
 // Определение пинов для датчика ДПП ------------------------------------------
-using PinPulse_t = STM_CppLib::STM_GPIO::GPIO_Pin_EXTI
-    <STM_CppLib::STM_GPIO::GPIO_Port::PortC, GPIO_PinSource1, dpp_irq_handler>;
+using PinPulse_t = STM_CppLib::STM_GPIO::GPIO_Pin
+    <STM_CppLib::STM_GPIO::GPIO_Port::PortC, GPIO_PinSource1>;
 
 using PinDirection_t = STM_CppLib::STM_GPIO::GPIO_Pin
     <STM_CppLib::STM_GPIO::GPIO_Port::PortC, GPIO_PinSource3>;
@@ -259,8 +265,15 @@ void InitAll(){
     
     com_port.Init();
 
-    // Настройка основного таймера с периодом счёта в 250 мс (4 Гц)
-    uint32_t tim3_period = 2500 - 1;
+    // Настройка таймера для опроса ДПП с частотой в 100 ГЦ
+    uint32_t tim2_period = 100 - 1;
+    timer2.Init(tim2_period);
+    timer2.Start();  // Сразу запустим таймер
+
+    // // Настройка основного таймера с периодом счёта в 250 мс (4 Гц)
+    // uint32_t tim3_period = 2500 - 1;
+    // Настройка основного таймера с периодом счёта в 100 мс (10 Гц)
+    uint32_t tim3_period = 1000 - 1;
     timer3.Init(tim3_period);
 
     // Настройка таймера для мерцания светодиодами с периодом счёта в 2 с
@@ -417,7 +430,7 @@ void MeasuringStage_init(){
 
 // Функция для исполнения MeasuringStage 
 void MeasuringStage_execute(){
-    leds.ChangeLedStatus(LED9);
+    leds.ChangeLedStatus(LED8);
 
     if (timer_tick_flag){
 
