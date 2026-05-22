@@ -356,6 +356,7 @@ class MainWindow(QMainWindow):
         self._app_config = AppConfig.load(config_path)
         self._app_config.logger_config.log_filename = "app_logger.log"
         self._app_config.logger_config.log_level = logging.DEBUG
+        self._app_config.logger_config.use_console = False
 
         # Зададим логгер приложения
         self._app_logger = AppLogger(self._app_config).get_child_logger("MainWindow")

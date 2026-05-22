@@ -1,10 +1,10 @@
-# System imports
+"""Кватернионы для описания ориентации тележки."""
 
 # External imports
 import numpy as np
 
 # User imports
-from dev.data_analys.math_tools.vector_3d import Vector
+from .vector_3d import Vector
 
 ##########################################################
 
@@ -25,11 +25,12 @@ class Quaternion:
     def normalize(self) -> None:
         """Нормализация кватерниона."""
         norm = self.norm
-        if norm > 0:
-            self.w /= norm
-            self.x /= norm
-            self.y /= norm
-            self.z /= norm
+        if norm <= 0:
+            raise ZeroDivisionError("Cannot normalize a zero quaternion")
+        self.w /= norm
+        self.x /= norm
+        self.y /= norm
+        self.z /= norm
 
     @property
     def norm(self) -> float:
@@ -68,13 +69,14 @@ class Quaternion:
             Повёрнутый вектор (объект Vector).
         """
         if not isinstance(vec, Vector):
-            TypeError("Поворот с помощью кватерниона определён только для типа Vector")
+            raise TypeError("Quaternion vector rotation is defined only for Vector")
 
-        self.normalize()    # Нормируем кватернион
+        rotation = self.copy()
+        rotation.normalize()
 
         # Реализуем поворот вектора
         p = Quaternion(0, vec[0], vec[1], vec[2])
-        rotated = self * p * self.conjugate()
+        rotated = rotation * p * rotation.conjugate()
 
         return Vector([rotated.x, rotated.y, rotated.z])
 
@@ -103,7 +105,10 @@ class Quaternion:
         """
         # Преобразуем ось в numpy-массив
         axis_np = np.array(axis.to_list())
-        axis_np = axis_np / np.linalg.norm(axis_np)
+        axis_norm = np.linalg.norm(axis_np)
+        if axis_norm <= 0:
+            return cls()
+        axis_np = axis_np / axis_norm
         half_angle = angle * 0.5
         sin_half = np.sin(half_angle)
         return cls(
@@ -126,6 +131,8 @@ class Quaternion:
             Кватернион, соответствующий повороту за время dt (в предположении постоянной угловой скорости).
         """
         omega = gyro.norm
+        if omega <= 0 or dt == 0:
+            return cls()
         axis = gyro / omega
         angle = omega * dt
         return cls.from_axis_angle(axis, angle)
