@@ -73,24 +73,63 @@ def _initial_orientation_from_static_vectors(
 
     latitude_rad = np.radians(latitude_deg)
     gravity_norm = np.linalg.norm(acc_mean)
-    earth_rate_north = OMEGA_EARTH_RAD_S * np.cos(latitude_rad)
-    cross_norm = gravity_norm * earth_rate_north
+    gyro_norm = np.linalg.norm(gyro_mean)
+
+    gyro_north = gyro_norm * np.sin(latitude_rad)
+    gyro_up = gyro_norm * np.cos(latitude_rad)
+    cross_norm = gravity_norm * gyro_north
 
     if gravity_norm <= 0:
         raise ValueError("Static accelerometer norm must be positive")
-    if abs(earth_rate_north) <= 0:
-        raise ValueError("Earth-rate north projection is too small for alignment")
+    if gyro_norm <= 0:
+        raise ValueError("Static gyroscope norm must be positive")
+    if abs(gyro_north) <= 0:
+        raise ValueError("Gyroscope north projection is too small for alignment")
 
     cross_body = np.cross(gyro_mean, acc_mean)
-    col_east = cross_body / cross_norm
-    col_north = (
-        gyro_mean
-        - (OMEGA_EARTH_RAD_S * np.sin(latitude_rad) / gravity_norm) * acc_mean
-    ) / earth_rate_north
     col_up = acc_mean / gravity_norm
+    col_east = cross_body / cross_norm
+    col_north = (gyro_mean - (gyro_up / gravity_norm) * acc_mean) / gyro_north
+
+    # Кватернион должен строиться только по ортонормированной матрице
+    # поворота. Старый матричный алгоритм затем использовал Mreverse(),
+    # поэтому мог частично скрывать неортогональность из-за bias гироскопа.
+    col_east, col_north, col_up = _orthonormalize_alignment_basis(
+        col_east=col_east,
+        col_north=col_north,
+        col_up=col_up,
+    )
 
     rotation_nav_to_body = np.column_stack((col_east, col_north, col_up))
     q_nav_to_body = Quaternion.from_matrix(rotation_nav_to_body)
     q_body_to_nav = q_nav_to_body.conjugate()
     q_body_to_nav.normalize()
     return q_body_to_nav
+
+
+def _orthonormalize_alignment_basis(
+    col_east: np.ndarray,
+    col_north: np.ndarray,
+    col_up: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Приводит базис выставки к ортонормированному правому трехграннику."""
+
+    col_up = col_up / np.linalg.norm(col_up)
+
+    col_east = col_east - np.dot(col_east, col_up) * col_up
+    east_norm = np.linalg.norm(col_east)
+    if east_norm <= 0:
+        raise ValueError("East axis cannot be built from static accelerometer and gyroscope data")
+    col_east = col_east / east_norm
+
+    col_north_projected = col_north - np.dot(col_north, col_up) * col_up
+    col_north_projected -= np.dot(col_north_projected, col_east) * col_east
+    north_norm = np.linalg.norm(col_north_projected)
+    if north_norm > 0:
+        col_north = col_north_projected / north_norm
+    else:
+        col_north = np.cross(col_up, col_east)
+
+    col_east = np.cross(col_north, col_up)
+    col_east = col_east / np.linalg.norm(col_east)
+    return col_east, col_north, col_up
