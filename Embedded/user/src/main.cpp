@@ -57,8 +57,12 @@ extern pHandler __isr_vectors[];
  * Пользовательские переменные
  *************************************************************************** */
 
-// Собственная таблица прерываний
-__attribute__((aligned(128)))    // Cortex-M4 требует выравнивание по 128 байт!
+/**
+ * @brief   RAM-копия таблицы векторов прерываний.
+ * @details 98 векторов занимают 392 байта, поэтому VTOR должен указывать на
+ *          адрес, выровненный по ближайшей большей степени двойки: 512 байт.
+ */
+__attribute__((aligned(512)))
 _user_pHandler _user_vector_table[IST_VECTORS_NUM] = {0};
 
 // ----------------------------------------------------------------------------
@@ -82,12 +86,6 @@ Commands::CommandManager command_manager;
 STM_CppLib::UsbPort::UsbPort com_port;
 
 // Используемые таймеры -------------------------------------------------------
-
-// Таймер для опроса ДПП
-STM_CppLib::STM_Timer::Timer2<[](){
-    /* Объявление лямбды, которая будет вызываться в прерывании */
-    dpp_irq_handler();
-}>  timer2;
 
 // Таймер для чтения данных
 STM_CppLib::STM_Timer::Timer3<[](){
@@ -118,8 +116,8 @@ STM_CppLib::LSM303DLHC  sensor_LSM303DLHC;      // Встроенный датч
                                                 // магнитным и температурным датчиками
 
 // Определение пинов для датчика ДПП ------------------------------------------
-using PinPulse_t = STM_CppLib::STM_GPIO::GPIO_Pin
-    <STM_CppLib::STM_GPIO::GPIO_Port::PortC, GPIO_PinSource1>;
+using PinPulse_t = STM_CppLib::STM_GPIO::GPIO_Pin_EXTI
+    <STM_CppLib::STM_GPIO::GPIO_Port::PortC, GPIO_PinSource1, dpp_irq_handler>;
 
 using PinDirection_t = STM_CppLib::STM_GPIO::GPIO_Pin
     <STM_CppLib::STM_GPIO::GPIO_Port::PortC, GPIO_PinSource3>;
@@ -264,11 +262,6 @@ void InitAll(){
     dpp_sensor.Init();
     
     com_port.Init();
-
-    // Настройка таймера для опроса ДПП с частотой в 100 ГЦ
-    uint32_t tim2_period = 100 - 1;
-    timer2.Init(tim2_period);
-    timer2.Start();  // Сразу запустим таймер
 
     // // Настройка основного таймера с периодом счёта в 250 мс (4 Гц)
     // uint32_t tim3_period = 2500 - 1;
