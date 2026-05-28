@@ -33,7 +33,7 @@ namespace Dpp
      *          - PinDirection == 0: dpp_code увеличивается;
      *          - PinDirection == 1: dpp_code уменьшается.
      */
-    template <STM_CppLib::STM_GPIO::GpioPinConcept PinPulse,
+    template <STM_CppLib::STM_GPIO::GpioPinExtiConcept PinPulse,
               STM_CppLib::STM_GPIO::GpioPinConcept PinDirection>
     class DppSensor{
     private:
@@ -60,7 +60,7 @@ namespace Dpp
          *          вход направления - как обычный GPIO-вход.
          */
         void Init(){
-            pin_pulse.InitPin(GPIO_Mode_IN, GPIO_PuPd_UP);
+            pin_pulse.InitPinExti(GPIO_Mode_IN, GPIO_PuPd_UP);
             pin_direction.InitPin(GPIO_Mode_IN, GPIO_PuPd_UP);
             prev_state = pin_pulse.ReadPin();  // Запоминаем начальное состояние
         }
