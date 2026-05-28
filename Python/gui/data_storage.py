@@ -77,7 +77,8 @@ class DataStorage:
             f'{package.package_num}{self._sep}'
             f'{package.dpp_code}{self._sep}'
             f'{package.acc.x_coord}{self._sep}{package.acc.y_coord}{self._sep}{package.acc.z_coord}{self._sep}'
-            f'{package.gyro.x_coord}{self._sep}{package.gyro.y_coord}{self._sep}{package.gyro.z_coord}\n'
+            f'{package.gyro.x_coord}{self._sep}{package.gyro.y_coord}{self._sep}{package.gyro.z_coord}'
+            f'{self._sep}{package.temp}\n'
         )
         self._count += 1
 
@@ -98,5 +99,5 @@ class DataStorage:
         file.write(
             f'PackageNum{self._sep}DppCode{self._sep}'
             f'AccX{self._sep}AccY{self._sep}AccZ{self._sep}'
-            f'GyroX{self._sep}GyroY{self._sep}GyroZ\n'
+            f'GyroX{self._sep}GyroY{self._sep}GyroZ{self._sep}Temp\n'
         )

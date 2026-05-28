@@ -1,52 +1,50 @@
-"""
-Основной пакет для обработки данных с акселерометра и гироскопа
-для системы автономной навигации
-"""
+"""Пакет постобработки измерительных проездов Telega."""
 
-__version__ = '1.0.0'
-__author__ = 'Roman Romanovskiy'
-
-# --------------------------------------------------------
-
-from .utils import (
-    name_of_file,
-    cumulative_trapezoidal_integral,
-    trapezoidal_integration,
-    linear_subtraction,
-    writing_to_csv_file,
-    create_dir
+# User imports
+from .data_loader import load_run_csv
+from .dpp_axis import (
+    aggregate_by_dpp,
+    build_common_dpp_table,
+    detect_direction_from_dpp,
+    downsample_common_dpp_table,
 )
-
-from dev.data_analys.rotation_analys import (
-    RotatingFrameAnalyzer,
-    Vector,
-    Matrix
+from .file_discovery import discover_run_files
+from .initialization import initialize_from_static_buffer
+from .inertial import process_inertial_data
+from .models import (
+    DppDownsampleMode,
+    FilterConfig,
+    ProcessingConfig,
+    ProcessingResult,
+    RunDirection,
+    RunFiles,
+    SessionProcessingResult,
+    TemperatureCompensationConfig,
 )
+from .pipeline import discover_and_process_session, process_run, process_session
+from .trajectory import compute_trajectory
 
-from .filtering import Filter
-from .data_processing import DataProcessing
-
-# --------------------------------------------------------
+##########################################################
 
 __all__ = [
-    # Из utils
-    'name_of_file',
-    'cumulative_trapezoidal_integral',
-    'trapezoidal_integration',
-    'linear_subtraction',
-    'writing_to_csv_file',
-    'create_dir',
-
-    # Из rotation_analys
-    'RotatingFrameAnalyzer',
-    'Vector',
-    'Matrix',
-
-    # Из filtering
-    'Filter',
-
-    # Из data_processing
-    'DataProcessing'
+    "DppDownsampleMode",
+    "FilterConfig",
+    "ProcessingConfig",
+    "ProcessingResult",
+    "RunDirection",
+    "RunFiles",
+    "SessionProcessingResult",
+    "TemperatureCompensationConfig",
+    "aggregate_by_dpp",
+    "build_common_dpp_table",
+    "compute_trajectory",
+    "detect_direction_from_dpp",
+    "discover_and_process_session",
+    "discover_run_files",
+    "downsample_common_dpp_table",
+    "initialize_from_static_buffer",
+    "load_run_csv",
+    "process_inertial_data",
+    "process_run",
+    "process_session",
 ]
-
-# --------------------------------------------------------
