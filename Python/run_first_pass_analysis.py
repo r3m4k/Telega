@@ -11,8 +11,15 @@ import numpy as np
 matplotlib.use("Agg")
 
 # User imports
-from data_analys import ProcessingConfig, RunFiles, discover_run_files, load_run_csv, process_run
-from data_analys.data_loader import ACC_COLUMNS, GYRO_DEG_COLUMNS
+from data_analys import (
+    FrequencyAnalyser,
+    ProcessingConfig,
+    RunFiles,
+    discover_run_files,
+    load_run_csv,
+    process_run,
+)
+from data_analys.data_loader import ACC_COLUMNS, GYRO_RAD_COLUMNS
 from data_analys.math_tools import Vector
 from plotting import CanvasConfig, Plotter
 
@@ -96,6 +103,7 @@ def main() -> int:
     print_header("Построение графиков")
     _plot_static_buffer(static_data.dataframe, plots_dir)
     _plot_measuring_acceleration(result.detailed_dataframe, plots_dir)
+    _plot_frequency_analysis(static_data.dataframe, result.detailed_dataframe, plots_dir)
     print(f"Графики сохранены в: {plots_dir}")
 
     print_header("Готово")
@@ -140,9 +148,9 @@ def _plot_static_buffer(df, output_dir: Path) -> None:
     )
     _plot_static_3d(
         x_data=x_data,
-        y_data=[df[column].to_numpy(dtype=float) for column in GYRO_DEG_COLUMNS],
+        y_data=[df[column].to_numpy(dtype=float) for column in GYRO_RAD_COLUMNS],
         title="Статический буфер: угловые скорости",
-        y_labels=["GyroX, град/с", "GyroY, град/с", "GyroZ, град/с"],
+        y_labels=["GyroX, рад/с", "GyroY, рад/с", "GyroZ, рад/с"],
         colors=GYRO_CLASSIC,
         dark_colors=GYRO_DARK,
         output_path=output_dir / "run_1_static_gyro.png",
@@ -172,6 +180,57 @@ def _plot_measuring_acceleration(df, output_dir: Path) -> None:
         y_labels=["AccE, м/с**2", "AccN, м/с**2", "AccU, м/с**2"],
         colors=NAV_CLASSIC,
         output_path=output_dir / "run_1_measuring_acc_enu.png",
+    )
+
+
+def _plot_frequency_analysis(static_df, measuring_df, output_dir: Path) -> None:
+    """Строит частотный анализ данных статического буфера и измерительного проезда."""
+
+    frequency_dir = output_dir / "frequency"
+    frequency_dir.mkdir(parents=True, exist_ok=True)
+
+    static_time = np.arange(len(static_df), dtype=float) / SAMPLE_RATE_HZ
+    measuring_time = measuring_df["Time"].to_numpy(dtype=float)
+
+    _save_frequency_plot(
+        data=_vector_norm(static_df, ACC_COLUMNS),
+        time=static_time,
+        title="Частотный анализ статического буфера: норма ускорения",
+        output_path=frequency_dir / "run_1_static_acc_abs_frequency.png",
+        time_color="darkgoldenrod",
+        freq_color="goldenrod",
+    )
+    _save_frequency_plot(
+        data=_vector_norm(static_df, GYRO_RAD_COLUMNS),
+        time=static_time,
+        title="Частотный анализ статического буфера: норма угловой скорости",
+        output_path=frequency_dir / "run_1_static_gyro_abs_frequency.png",
+        time_color="indigo",
+        freq_color="tab:purple",
+    )
+    _save_frequency_plot(
+        data=_vector_norm(measuring_df, ACC_COLUMNS),
+        time=measuring_time,
+        title="Частотный анализ проезда 1: норма исходного ускорения",
+        output_path=frequency_dir / "run_1_measuring_acc_body_abs_frequency.png",
+        time_color="darkgoldenrod",
+        freq_color="goldenrod",
+    )
+    _save_frequency_plot(
+        data=_vector_norm(measuring_df, ["AccNavE", "AccNavN", "AccNavU"]),
+        time=measuring_time,
+        title="Частотный анализ проезда 1: норма ускорения в ENU",
+        output_path=frequency_dir / "run_1_measuring_acc_enu_abs_frequency.png",
+        time_color="darkolivegreen",
+        freq_color="tab:olive",
+    )
+    _save_frequency_plot(
+        data=_vector_norm(measuring_df, GYRO_RAD_COLUMNS),
+        time=measuring_time,
+        title="Частотный анализ проезда 1: норма угловой скорости",
+        output_path=frequency_dir / "run_1_measuring_gyro_abs_frequency.png",
+        time_color="indigo",
+        freq_color="tab:purple",
     )
 
 
@@ -229,6 +288,32 @@ def _plot_dynamic_3d(
     plotter = Plotter(config)
     plotter.plotting_3d()
     plotter.save(str(output_path))
+
+
+def _vector_norm(df, columns: Iterable[str]) -> np.ndarray:
+    """Возвращает евклидову норму трех компонент вектора из DataFrame."""
+
+    values = df[list(columns)].to_numpy(dtype=float)
+    return np.sqrt(np.sum(values * values, axis=1))
+
+
+def _save_frequency_plot(
+    data: np.ndarray,
+    time: np.ndarray,
+    title: str,
+    output_path: Path,
+    time_color: str,
+    freq_color: str,
+) -> None:
+    """Сохраняет график временного сигнала и его амплитудного спектра."""
+
+    analyser = FrequencyAnalyser(data, time, SAMPLE_RATE_HZ)
+    analyser.visualisation(
+        suptitle=title,
+        time_color=time_color,
+        freq_color=freq_color,
+    )
+    analyser.canvas.save_figure(str(output_path))
 
 
 def print_header(text: str) -> None:
