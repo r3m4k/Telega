@@ -8,8 +8,10 @@
 #include "stm32f3_discovery_lsm303dlhc.h"
 #include "TriaxialData.hpp"
 #include "SensorScaler.hpp"
+#include "GpioPin.hpp"
 
 /* Defines -------------------------------------------------------------------*/
+#define INDICATE_LSM303DLHC_READING
 // #define USE_MAGNETIC_SENSOR
 #define USE_TEMPERATURE_SENSOR
 
@@ -54,17 +56,57 @@ namespace STM_CppLib{
         float temperature;
     #endif /*    USE_TEMPERATURE_SENSOR   */
 
+    #ifdef INDICATE_LSM303DLHC_READING
+    private:
+        // Пин для индикации чтения данных акселерометра
+        using PinIndicator_AccReading_t = STM_CppLib::STM_GPIO::GPIO_Pin
+            <STM_CppLib::STM_GPIO::GPIO_Port::PortB, GPIO_PinSource11>;
+        PinIndicator_AccReading_t acc_reading_indicator_pin;
+
+    #ifdef USE_MAGNETIC_SENSOR
+        // Пин для индикации чтения данных магнитометра
+        using PinIndicator_MagReading_t = STM_CppLib::STM_GPIO::GPIO_Pin
+            <STM_CppLib::STM_GPIO::GPIO_Port::PortB, GPIO_PinSource12>;
+        PinIndicator_MagReading_t mag_reading_indicator_pin;
+    #endif /*   USE_MAGNETIC_SENSOR   */
+    
+    #ifdef USE_TEMPERATURE_SENSOR
+        // Пин для индикации чтения данных температуры
+        using PinIndicator_TempReading_t = STM_CppLib::STM_GPIO::GPIO_Pin
+            <STM_CppLib::STM_GPIO::GPIO_Port::PortB, GPIO_PinSource13>;
+        PinIndicator_TempReading_t temp_reading_indicator_pin;
+    #endif /*    USE_TEMPERATURE_SENSOR   */
+
+    #endif /*   INDICATE_LSM303DLHC_READING     */
+
 
         // ---------------------------------------------------------------------
         // Методы класса
         // ---------------------------------------------------------------------
     public:
-        // Инициализация датчиков
+        // Инициализация датчиков 
+        // (проиницализируем все датчики в не зависимости от их использования)
         void Init(){
             AccInit();
-        #ifdef USE_MAGNETIC_SENSOR
             MagInit();
+
+            // Инициализация нужных индикаторов
+        #ifdef INDICATE_LSM303DLHC_READING
+            // Проинициализируем пин-индикатор и принудительно сбросим его
+            acc_reading_indicator_pin.InitPin();
+            acc_reading_indicator_pin.ResetPin();
+
+        #ifdef USE_MAGNETIC_SENSOR
+            mag_reading_indicator_pin.InitPin();
+            mag_reading_indicator_pin.ResetPin();
         #endif /*   USE_MAGNETIC_SENSOR   */
+
+        #ifdef USE_TEMPERATURE_SENSOR
+            temp_reading_indicator_pin.InitPin();
+            temp_reading_indicator_pin.ResetPin();
+        #endif /*    USE_TEMPERATURE_SENSOR   */
+
+        #endif /*   INDICATE_LSM303DLHC_READING     */
         }
 
         void InitAccScaller(){
@@ -150,7 +192,6 @@ namespace STM_CppLib{
             
         }
 
-        #ifdef USE_MAGNETIC_SENSOR
         // Инициализация магнитометра
         void MagInit(){
 
@@ -167,6 +208,7 @@ namespace STM_CppLib{
 
             LSM303DLHC_MagInit(&InitStruct);
     
+        #ifdef USE_MAGNETIC_SENSOR
             // ----------------------------------------------------------------
             // Установим чувствительность магнитометра
             switch (InitStruct.MagFull_Scale)
@@ -199,9 +241,9 @@ namespace STM_CppLib{
                 Mag_Sensitivity_XY = LSM303DLHC_M_SENSITIVITY_XY_8_1Ga;
                 Mag_Sensitivity_Z = LSM303DLHC_M_SENSITIVITY_Z_8_1Ga;
                 break;
-            }            
-        }
+            }   
         #endif /*   USE_MAGNETIC_SENSOR   */
+        }
 
         // ------------------------------
         // Чтение данных датчиков
@@ -222,6 +264,11 @@ namespace STM_CppLib{
         }
 
         void ReadAcc(){
+
+        #ifdef INDICATE_LSM303DLHC_READING
+            acc_reading_indicator_pin.SetPin();
+        #endif /*   INDICATE_LSM303DLHC_READING     */
+
             int16_t pnRawData[3];
             uint8_t buffer[6] = {0};
 
@@ -240,10 +287,20 @@ namespace STM_CppLib{
 
             acc_data *= AccCoeff;           // Домножим на необходимый весовой коэффициент
             acc_data *= acc_scale_rate;     // Домножим на необходимый масштабирующий коэффициент
+        
+        #ifdef INDICATE_LSM303DLHC_READING
+            acc_reading_indicator_pin.ResetPin();
+        #endif /*   INDICATE_LSM303DLHC_READING     */
+
         }
         
     #ifdef USE_MAGNETIC_SENSOR
         void ReadMag(){
+
+        #ifdef INDICATE_LSM303DLHC_READING
+            mag_reading_indicator_pin.SetPin();
+        #endif /*   INDICATE_LSM303DLHC_READING     */
+        
             uint8_t buffer[6] = {0};
 
             // Прочитаем регистры данных в порядке, указанным в system/include/stm32f3-stdperiph/stm32f3_discovery_lsm303dlhc.h:197
@@ -255,17 +312,30 @@ namespace STM_CppLib{
             mag_data.z_coord =  static_cast<float>(static_cast<int16_t>(buffer[2] << 8) + buffer[3]) / Mag_Sensitivity_Z;
 
             mag_data *= MagCoeff;   // Домножим на необходимый весовой коэффициент
+        
+        #ifdef INDICATE_LSM303DLHC_READING
+            mag_reading_indicator_pin.ResetPin();
+        #endif /*   INDICATE_LSM303DLHC_READING     */
+
         }
     #endif /*   USE_MAGNETIC_SENSOR   */
 
     #ifdef USE_TEMPERATURE_SENSOR
         void ReadTemp(){
+        #ifdef INDICATE_LSM303DLHC_READING
+            temp_reading_indicator_pin.SetPin();
+        #endif /*   INDICATE_LSM303DLHC_READING     */
+
             uint8_t high_bit, low_bit;
 
             LSM303DLHC_Read(MAG_I2C_ADDRESS, LSM303DLHC_TEMP_OUT_H_M, &high_bit, 1);
             LSM303DLHC_Read(MAG_I2C_ADDRESS, LSM303DLHC_TEMP_OUT_L_M, &low_bit,  1);
 
             temperature = static_cast<float>(static_cast<int16_t>(static_cast<uint16_t>(high_bit << 8) + low_bit) >> 4);
+        #ifdef INDICATE_LSM303DLHC_READING
+            temp_reading_indicator_pin.ResetPin();
+        #endif /*   INDICATE_LSM303DLHC_READING     */
+
         }
     #endif /*   USE_TEMPERATURE_SENSOR   */
     

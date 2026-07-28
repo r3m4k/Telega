@@ -60,11 +60,6 @@ namespace Commands{
     inline ByteCommand Set_FooStage_Cmd({0xaa, 0x00}, set_FooStage, ConfirmPolicy::Required);
 
     /**
-     * @brief   Отложенная команда: переход в стадию CalibrationStage.
-     */
-    inline ByteCommand Set_CalibrationStage_Cmd({0xaa, 0x01}, set_CalibrationStage, ConfirmPolicy::Required);
-
-    /**
      * @brief   Отложенная команда: переход в стадию MeasuringStage.
      */
     inline ByteCommand Set_MeasureStage_Cmd({0xaa, 0x02}, set_MeasureStage, ConfirmPolicy::Required);
@@ -123,7 +118,6 @@ namespace Commands{
          */
         inline static const BaseCommand* deferred_commands[] = {
             &Set_FooStage_Cmd,
-            &Set_CalibrationStage_Cmd,
             &Set_StaticInitStage_Cmd,
             &Set_MeasureStage_Cmd,
         };
