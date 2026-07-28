@@ -104,7 +104,8 @@ namespace Packages{
 
         /**
          * @brief   Обновить содержимое пакета актуальными данными.
-         * @details Копирует текущие значения из внешних объектов во внутреннюю структуру.
+         * @details Копирует текущие значения из внешних объектов во внутреннюю структуру
+         *          и обновляет значение контрольной суммы.
          */
         void UpdateData() {
             package_body.time = *time_ptr;
@@ -112,13 +113,6 @@ namespace Packages{
             package_body.gyro_data = *gyro_data_ptr;
             package_body.temp = *temp_data_ptr;
             package_body.dpp_code = *dpp_code_ptr;
-        }
-
-        /**
-         * @brief   Пересчитать и обновить контрольную сумму пакета.
-         * @details Вызывает CountControlSum() и сохраняет результат в поле control_sum.
-         */
-        void UpdateControlSum(){
             package_body.control_sum = CountControlSum();
         }
         

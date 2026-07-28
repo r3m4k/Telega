@@ -72,7 +72,7 @@ uint32_t tick_counter = 0;
 volatile bool timer_tick_flag = false;
 
 // Счётчик, необходимый для снижения частоты опроса температурного датчика
-uint8_t sensor_reading_counter = 0;     
+uint32_t sensor_reading_counter = 0;     
 
 // ----------------------------------------------------------------------------
 
@@ -150,6 +150,8 @@ class ProgramStage{
     
 public:
     bool is_init = false;
+
+    ProgramStage() = delete;
 
     ProgramStage(CommandHandlerFunc _init_func, CommandHandlerFunc _execute_func):
         init_func(_init_func), execute_func(_execute_func) {}
@@ -391,7 +393,6 @@ void StaticStage_execute(){
 
         // Обновим данные в посылке и отправим её по com-порту
         telega_package.UpdateData();
-        telega_package.UpdateControlSum();
         com_port.SendPackage(telega_package);
 
         // Сбросим фильтры
@@ -413,12 +414,15 @@ void MeasuringStage_init(){
     tick_counter = 0;
     sensor_reading_counter = 0;
     leds.LedsOff();
-    // Запустим таймер сбора данных с частотой 4 Гц
+    // Запустим таймер сбора данных
     timer3.ResetCounter();
     timer3.Start();
     // Запустим таймер индикации работы
     timer4.ResetCounter();
     timer4.Start();
+
+    // Задержка, чтобы отсечь колебания установки от нажатие кнопки оператором
+    Delay(2000);
 }
 
 // Функция для исполнения MeasuringStage 
@@ -428,42 +432,22 @@ void MeasuringStage_execute(){
     if (timer_tick_flag){
 
         /* ***********************************************************************
-        * ВАЖНО! Длительность выполнения этой стадии не должна превышать 200мс
-        * для обеспечения выдачи данных с частотой 4 Гц. Длительность выполнения
-        * можно менять с помощью шаблонных параметров NSigmaFilter.
+        * ВАЖНО! Длительность выполнения этой стадии не должна превышать период
+        * timer3, который инициирует начало чтения данных.
         *********************************************************************** */
 
         leds.LedOn(LED5);
 
-        while(!filter_acc.is_data_filtered() || !filter_gyro.is_data_filtered() || !filter_temp.is_data_filtered()){
-            // Считаем значения и добавим полученные значения в фильтры
-            sensor_L3GD20.ReadGyro();
-            filter_gyro.append_value(sensor_L3GD20.gyro_data);
-
-            sensor_LSM303DLHC.ReadAcc();
-            filter_acc.append_value(sensor_LSM303DLHC.acc_data);
-
-            // Данные температуры будем считывать в 4 раза реже
-            if (sensor_reading_counter++ % 4 == 0) {
-                sensor_LSM303DLHC.ReadTemp();
-                filter_temp.append_value(sensor_LSM303DLHC.temperature);
-            }
+        // Считаем показания датчиков
+        sensor_L3GD20.ReadGyro();
+        sensor_LSM303DLHC.ReadAcc();
+        if (sensor_reading_counter++ % 4 == 0) {
+            sensor_LSM303DLHC.ReadTemp();
         }
-
-        // Обновим данные с датчиков
-        acc_value = filter_acc.get_filtered_data();
-        gyro_value = filter_gyro.get_filtered_data();
-        temp_value = filter_temp.get_filtered_data();
 
         // Обновим данные в посылке и отправим её по com-порту
         telega_package.UpdateData();
-        telega_package.UpdateControlSum();
         com_port.SendPackage(telega_package);
-
-        // Сбросим фильтры
-        filter_acc.reset();
-        filter_gyro.reset();
-        filter_temp.reset();
 
         leds.LedOff(LED5);
         timer_tick_flag = false;
@@ -486,10 +470,6 @@ void restart(){
 
 void set_FooStage(){
     program_stage_queue.put(&FooStage);
-}
-
-void set_CalibrationStage(){
-    program_stage_queue.put(&CalibrationStage);
 }
 
 void set_StaticStage(){
@@ -525,12 +505,6 @@ void send_heartbeat_ack(){
 
 void send_error_msg(){
     const char* text = "UNKNOWN_COMMAND";
-    Packages::MessagePackage msg_package(text, strlen(text));
-    com_port.SendPackage(msg_package);
-}
-
-void send_end_of_calibration_msg(){
-    const char* text = "END_OF_CALIBRATION";
     Packages::MessagePackage msg_package(text, strlen(text));
     com_port.SendPackage(msg_package);
 }
