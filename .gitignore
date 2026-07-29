@@ -23,6 +23,7 @@ dist/
 
 # Local application configuration
 **/settings.json
+**/.env
 
 # Logs and profiling output
 *.log

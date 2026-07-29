@@ -2,35 +2,25 @@
 # Используемые переменные в Makefile
 # ----------------------------------
 
-# ОС, на которой собирается проект
-# SYSTEM - переменная, задаваемая при запуске makefile
-# Зададим её тут, чтобы при запуске makefile из командной строки не задавать её
-SYSTEM := windows	
+# ОС, на которой собирается проект. Используется для создания директорий.
+SYSTEM ?= windows
 
-# Названеи проекта
-PROGRAM_NAME := STM_PROJECT
+# Название проекта.
+PROGRAM_NAME ?= STM_PROJECT
 
-# Директория с исходным кодом относительно Makefile.mk
-SOURCE_DIR = D:/Job/Telega/Embedded
+# Корень embedded-проекта относительно данного файла.
+SOURCE_DIR ?= $(abspath $(dir $(lastword $(MAKEFILE_LIST)))..)
 
 # Название итогового исполняемого файла
-BINARY = ${PROGRAM_NAME}.elf
+BINARY ?= ${PROGRAM_NAME}.elf
 
 # Место хранения полученных объектных файлов
-ifeq ($(SYSTEM), windows)
-	BIN_PLACE = ${SOURCE_DIR}/Debug_Win
-else ifeq ($(SYSTEM), linux)
-	BIN_PLACE = ${SOURCE_DIR}/Debug_Lin
-else
-    $(error The OS is not specified)
-endif
+BIN_PLACE ?= ${SOURCE_DIR}/build
 
-ifeq ($(SYSTEM), windows)
-	GCC_PLACE = C:/SysGCC/arm-eabi
-else ifeq ($(SYSTEM), linux)
-	GCC_PLACE = /home/mike/gcc-arm-none-eabi-8-2019-q3-update/
-else
-    $(error The OS is not specified)
+# Корневой каталог ARM GCC задаётся локально через .env/build.sh
+# или как параметр командной строки Make.
+ifndef GCC_PLACE
+    $(error GCC_PLACE is not specified)
 endif
 
 # Исполняемый файл компиллятора-компоновщика
