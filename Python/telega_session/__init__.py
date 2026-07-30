@@ -11,6 +11,8 @@ __author__ = 'Roman Romanovskiy'
 
 # --------------------------------------------------------
 
+from .command_name import CommandName
+from .command_request import CommandRequest
 from .com_port_telega import ComPortTelega
 from .controller_telega import ControllerTelega
 from .decoder_telega import DecoderTelega, TelegaData
@@ -20,6 +22,8 @@ from .start_telega_session import start_telega_session
 # --------------------------------------------------------
 
 __all__ = [
+    'CommandName',
+    'CommandRequest',
     'ComPortTelega',
     'ControllerTelega',
     'DecoderTelega',

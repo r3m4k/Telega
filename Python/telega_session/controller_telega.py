@@ -4,15 +4,18 @@ import logging
 from enum import IntEnum
 from multiprocessing import Queue
 from queue import Empty
-from typing import Callable, Awaitable, Optional
+from typing import Any, Callable, Awaitable, Optional
 
 # External imports
+from pydantic import ValidationError
 
 # User imports
 from async_mc_controller.signal_bus import McBus
 from async_mc_controller.logger import McLogger
 from async_mc_controller.byte_source.read_error import ReadError
 from async_mc_controller.controller import Controller
+from telega_session.command_name import CommandName
+from telega_session.command_request import CommandRequest
 from telega_session.decoder_telega import TelegaData
 
 #########################
@@ -49,7 +52,7 @@ class TelegaStatusCodeMessages:
             TelegaStatusCode.SUCCESS:             "Корректное завершение работы",
             TelegaStatusCode.UNKNOWN_ERROR:       "Неизвестная ошибка",
             TelegaStatusCode.READ_ERROR:          "Ошибка чтения данных",
-            TelegaStatusCode.HANDSHAKE_FAILED:     "Ошибка процедуры рукопожатия",
+            TelegaStatusCode.HANDSHAKE_FAILED:    "Ошибка процедуры рукопожатия",
             TelegaStatusCode.DEVICE_LOST:         "Потеря связи с устройством",
             TelegaStatusCode.COMMAND_ACK_TIMEOUT: "Таймаут ожидания подтверждения команды",
             TelegaStatusCode.COMMAND_REJECTED:    "Команда не распознана устройством",
@@ -104,13 +107,13 @@ class ControllerTelega(Controller):
         self._reading_cmd_queue_task: Optional[asyncio.Task] = None
 
         # Словарь для соответствия полученного сообщения и метода отработки.
-        self._command_to_handler: dict[str, Callable[[], Awaitable[None]]] = {
-            "STOP_RUNNING": self._stop_running,
-            "HANDSHAKE_INIT": self._handshake_init,
-            "START_CALIBRATION": self._start_calibration,
-            "START_STATIC_INIT": self._start_static_init,
-            "START_MEASURING": self._start_measuring,
-            "STOP_MEASURING": self._stop_measuring,
+        self._command_to_handler: dict[CommandName, Callable[[dict[str, Any]], Awaitable[None]]] = {
+            CommandName.STOP_RUNNING: self._stop_running,
+            CommandName.HANDSHAKE_INIT: self._handshake_init,
+            CommandName.START_CALIBRATION: self._start_calibration,
+            CommandName.START_STATIC_INIT: self._start_static_init,
+            CommandName.START_MEASURING: self._start_measuring,
+            CommandName.STOP_MEASURING: self._stop_measuring,
         }
 
     # =============================================================
@@ -189,32 +192,32 @@ class ControllerTelega(Controller):
     # =================== Внутренняя логика =======================
     # =============================================================
 
-    async def _stop_running(self) -> None:
+    async def _stop_running(self, params: dict[str, Any]) -> None:
         """ Завершение работы контроллера """
         self._telega_controller_logger.debug('Завершение работы контроллера')
         self._stop_event.set()
 
-    async def _handshake_init(self) -> None:
+    async def _handshake_init(self, params: dict[str, Any]) -> None:
         """ Инициирование процедуры рукопожатия """
         self._telega_controller_logger.debug('Инициирование процедуры рукопожатия')
         await self._bus.handshake_init.emit()
 
-    async def _start_calibration(self) -> None:
+    async def _start_calibration(self, params: dict[str, Any]) -> None:
         """ Запуск калибровки датчиков """
         self._telega_controller_logger.debug('Запуск калибровки датчиков')
         await self._bus.start_calibration.emit()
 
-    async def _start_static_init(self) -> None:
+    async def _start_static_init(self, params: dict[str, Any]) -> None:
         """ Запуск набора статического буфера """
         self._telega_controller_logger.debug('Запуск набора статического буфера')
         await self._bus.start_static_init.emit()
 
-    async def _start_measuring(self) -> None:
+    async def _start_measuring(self, params: dict[str, Any]) -> None:
         """ Запуск измерений """
         self._telega_controller_logger.debug('Запуск измерений')
         await self._bus.start_measuring.emit()
 
-    async def _stop_measuring(self) -> None:
+    async def _stop_measuring(self, params: dict[str, Any]) -> None:
         """ Остановка измерений """
         self._telega_controller_logger.debug('Остановка измерений')
         await self._bus.stop_measuring.emit()
@@ -224,25 +227,49 @@ class ControllerTelega(Controller):
 
         self._telega_controller_logger.debug('Запуск _reading_command_queue')
 
-        def get_input_command(command_queue: Queue) -> Optional[str]:
-            """Ожидает команду ограниченное время, чтобы поток мог завершиться."""
+        def get_command_request(command_queue: Queue) -> Optional[CommandRequest]:
+            """Получает и валидирует команду ограниченное время.
+
+            Returns:
+                CommandRequest или None, если за отведённое время команда не поступила.
+
+            Raises:
+                ValidationError: Если полученные из очереди данные не соответствуют
+                    межпроцессорному протоколу команд.
+            """
             try:
-                return command_queue.get(timeout=0.1)
+                command_data = command_queue.get(timeout=0.1)
             except Empty:
                 return None
 
+            return CommandRequest.model_validate(command_data)
+
         try:
             while True:
-                cmd: Optional[str] = await asyncio.to_thread(get_input_command, self._command_queue)
-                if cmd is None:
-                    continue
-                if cmd not in self._command_to_handler.keys():
-                    self._telega_controller_logger.warning(f'Получена неизвестная команда {cmd} из _command_queue!')
+                try:
+                    command_request = await asyncio.to_thread(
+                        get_command_request,
+                        self._command_queue,
+                    )
+                    if command_request is None:
+                        continue
+                except ValidationError as err:
+                    self._telega_controller_logger.warning(
+                        f'Получена некорректная команда из _command_queue: {err}'
+                    )
                     continue
 
-                self._telega_controller_logger.debug(f'Получена команда {cmd}')
-                coro_handler = self._command_to_handler[cmd]
-                await coro_handler()
+                if command_request.command not in self._command_to_handler.keys():
+                    self._telega_controller_logger.warning(
+                        f'Получена неизвестная команда {command_request.command} из _command_queue!'
+                    )
+                    continue
+
+                self._telega_controller_logger.debug(
+                    f'Получена команда {command_request.command} с параметрами {command_request.params}'
+                )
+                coro_handler = self._command_to_handler[command_request.command]
+                await coro_handler(command_request.params)
 
         except asyncio.CancelledError:
             self._telega_controller_logger.debug('Таска _reading_command_queue отменена')

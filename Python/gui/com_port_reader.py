@@ -20,7 +20,7 @@ from PyQt5.QtCore import QObject, pyqtSignal
 
 # User imports
 from async_mc_controller.config import LoggerConfig, ComPortConfig
-from telega_session import start_telega_session
+from telega_session import CommandName, CommandRequest, start_telega_session
 from telega_session import TelegaData as PackageType
 
 ##########################################################
@@ -244,18 +244,18 @@ class ComPortReader(QObject):
             thread.start()
             return thread, reader
 
-        def send_command(self, command: str) -> None:
+        def send_command(self, command_request: CommandRequest) -> None:
             """Отправляет команду в self._command_queue.
 
             Args:
-                command: Текстовая команда для контроллера дочернего процесса.
+                command_request: Команда для контроллера дочернего процесса.
 
             Raises:
                 SessionNotRunning: Если дочерний процесс сессии не запущен.
             """
             if self.is_active:
-                self._logger.debug(f'Отправка команды {command}')
-                self._command_queue.put(command)
+                self._logger.debug(f'Отправка команды {command_request.command}')
+                self._command_queue.put(command_request.model_dump())
             else:
                 raise SessionNotRunning("Для отправки команды сначала запустите процесс!")
 
@@ -292,8 +292,8 @@ class ComPortReader(QObject):
 
             try:
                 self._logger.debug('Отправка команды штатного завершения сессии МК')
-                self._command_queue.put("STOP_RUNNING")
-            except (OSError, ValueError) as err:
+                self.send_command(CommandRequest(command=CommandName.STOP_RUNNING))
+            except (SessionNotRunning, OSError, ValueError) as err:
                 self._logger.warning(f'Не удалось отправить команду остановки сессии МК: {err}')
 
         def _wait_session_process(self, timeout_ms: int) -> None:
@@ -534,7 +534,7 @@ class ComPortReader(QObject):
             SessionNotRunning: Если дочерний процесс не запущен или уже завершился.
         """
         self._ensure_session_running()
-        self._worker.send_command("STOP_RUNNING")
+        self._worker.send_command(CommandRequest(command=CommandName.STOP_RUNNING))
 
     def shutdown(self,
                  process_timeout_ms: int = 3000,
@@ -587,7 +587,7 @@ class ComPortReader(QObject):
         self._logger.debug(f'Конфигурирование ComPortReader: port={com_port_name}, bin_file={bin_file}')
         try:
             self._worker.launch(logger_config, com_port_config, bin_file)
-            self._worker.send_command("HANDSHAKE_INIT")
+            self._worker.send_command(CommandRequest(command=CommandName.HANDSHAKE_INIT))
             self._is_configured = True
         except Exception:
             self._logger.exception('Ошибка конфигурирования ComPortReader, выполняется очистка ресурсов')
@@ -604,7 +604,7 @@ class ComPortReader(QObject):
         """
         self._ensure_session_running()
         if not self._calibration_running_flag:
-            self._worker.send_command("START_CALIBRATION")
+            self._worker.send_command(CommandRequest(command=CommandName.START_CALIBRATION))
             self._calibration_running_flag = True
         else:
             self._logger.debug("Попытка повторного запуска калибровки")
@@ -620,7 +620,7 @@ class ComPortReader(QObject):
         """
         self._ensure_session_running()
         if not self._static_init_running_flag:
-            self._worker.send_command("START_STATIC_INIT")
+            self._worker.send_command(CommandRequest(command=CommandName.START_STATIC_INIT))
             self._static_init_running_flag = True
         else:
             self._logger.debug("Попытка повторного запуска набора статического буфера")
@@ -636,7 +636,7 @@ class ComPortReader(QObject):
         """
         self._ensure_session_running()
         if not self._measuring_running_flag:
-            self._worker.send_command("START_MEASURING")
+            self._worker.send_command(CommandRequest(command=CommandName.START_MEASURING))
             self._measuring_running_flag = True
         else:
             self._logger.debug("Попытка повторного запуска сбора данных")
@@ -652,7 +652,7 @@ class ComPortReader(QObject):
         """
         self._ensure_session_running()
         if self._measuring_running_flag:
-            self._worker.send_command("STOP_MEASURING")
+            self._worker.send_command(CommandRequest(command=CommandName.STOP_MEASURING))
             self._measuring_running_flag = False
         else:
             self._logger.debug("Попытка остановки чтения данных до запуска")
