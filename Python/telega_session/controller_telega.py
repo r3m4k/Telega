@@ -17,6 +17,8 @@ from async_mc_controller.controller import Controller
 from telega_session.command_name import CommandName
 from telega_session.command_request import CommandRequest
 from telega_session.decoder_telega import TelegaData
+from telega_session.session_event import SessionEvent
+from telega_session.session_event_name import SessionEventName
 
 #########################
 
@@ -281,12 +283,12 @@ class ControllerTelega(Controller):
         except Exception as e:
             self._telega_controller_logger.error(f"Не удалось отправить пакет в data_queue: {e}")
 
-    async def _send_info_msg(self, msg: str) -> None:
-        """ Отправка информационных сообщений в response_queue """
+    async def _send_session_event(self, session_event: SessionEvent) -> None:
+        """Отправляет событие сессии в response_queue."""
         try:
-            await asyncio.to_thread(self._response_queue.put, msg)
+            await asyncio.to_thread(self._response_queue.put, session_event.model_dump())
         except Exception as e:
-            self._telega_controller_logger.error(f"Не удалось отправить пакет в response_queue: {e}")
+            self._telega_controller_logger.error(f"Не удалось отправить событие в response_queue: {e}")
 
     # =============================================================
     # =================== Обработчики сигналов ====================
@@ -308,7 +310,7 @@ class ControllerTelega(Controller):
         Отправка HANDSHAKE_DONE родительскому процессу
         через response_queue.
         """
-        await self._send_info_msg("HANDSHAKE_DONE")
+        await self._send_session_event(SessionEvent(event=SessionEventName.HANDSHAKE_DONE))
 
     async def on_stop_calibration(self) -> None:
         """ Обработчик сигнала STOP_CALIBRATION от декодера.
@@ -316,7 +318,7 @@ class ControllerTelega(Controller):
         Отправка STOP_CALIBRATION родительскому процессу
         через response_queue.
         """
-        await self._send_info_msg("STOP_CALIBRATION")
+        await self._send_session_event(SessionEvent(event=SessionEventName.STOP_CALIBRATION))
 
     async def on_stop_static_init(self) -> None:
         """ Обработчик сигнала STOP_STATIC_INIT от декодера.
@@ -324,7 +326,7 @@ class ControllerTelega(Controller):
         Отправка STOP_STATIC_INIT родительскому процессу
         через response_queue.
         """
-        await self._send_info_msg("STOP_STATIC_INIT")
+        await self._send_session_event(SessionEvent(event=SessionEventName.STOP_STATIC_INIT))
 
     async def on_interrupt_measuring(self) -> None:
         """ Обработчик сигнала INTERRUPT_MEASURING.
@@ -332,7 +334,7 @@ class ControllerTelega(Controller):
         Отмена _measuring_pipeline_task.
         """
         self._telega_status_code = TelegaStatusCode.UNKNOWN_ERROR
-        await self._send_info_msg("UNKNOWN_ERROR")
+        await self._send_session_event(SessionEvent(event=SessionEventName.UNKNOWN_ERROR))
         self._stop_event.set()
 
     async def on_read_error(self, err: ReadError) -> None:
@@ -347,7 +349,7 @@ class ControllerTelega(Controller):
         self._telega_controller_logger.error(f'Получено исключение: {err}')
         self._telega_status_code = TelegaStatusCode.READ_ERROR
         self._stop_event.set()
-        await self._send_info_msg("READ_ERROR")
+        await self._send_session_event(SessionEvent(event=SessionEventName.READ_ERROR))
 
     async def on_handshake_failed(self) -> None:
         """Обработчик сигнала HANDSHAKE_FAILED.
@@ -356,7 +358,7 @@ class ControllerTelega(Controller):
         и вызовем родительский обработчик сигнала.
         """
         self._telega_status_code = TelegaStatusCode.HANDSHAKE_FAILED
-        await self._send_info_msg("HANDSHAKE_FAILED")
+        await self._send_session_event(SessionEvent(event=SessionEventName.HANDSHAKE_FAILED))
         self._stop_event.set()
 
     async def on_device_lost(self) -> None:
@@ -366,7 +368,7 @@ class ControllerTelega(Controller):
         и вызовем родительский обработчик сигнала.
         """
         self._telega_status_code = TelegaStatusCode.DEVICE_LOST
-        await self._send_info_msg("DEVICE_LOST")
+        await self._send_session_event(SessionEvent(event=SessionEventName.DEVICE_LOST))
         self._stop_event.set()
 
     async def on_command_ack_timeout(self) -> None:
@@ -376,7 +378,7 @@ class ControllerTelega(Controller):
         и вызовем родительский обработчик сигнала.
         """
         self._telega_status_code = TelegaStatusCode.COMMAND_ACK_TIMEOUT
-        await self._send_info_msg("COMMAND_ACK_TIMEOUT")
+        await self._send_session_event(SessionEvent(event=SessionEventName.COMMAND_ACK_TIMEOUT))
         self._stop_event.set()
 
     async def on_command_rejected(self) -> None:
@@ -386,5 +388,5 @@ class ControllerTelega(Controller):
         и вызовем родительский обработчик сигнала.
         """
         self._telega_status_code = TelegaStatusCode.COMMAND_REJECTED
-        await self._send_info_msg("COMMAND_REJECTED")
+        await self._send_session_event(SessionEvent(event=SessionEventName.COMMAND_REJECTED))
         self._stop_event.set()

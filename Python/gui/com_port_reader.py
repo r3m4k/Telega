@@ -17,10 +17,17 @@ from multiprocessing.queues import Queue
 
 # External imports
 from PyQt5.QtCore import QObject, pyqtSignal
+from pydantic import ValidationError
 
 # User imports
 from async_mc_controller.config import LoggerConfig, ComPortConfig
-from telega_session import CommandName, CommandRequest, start_telega_session
+from telega_session import (
+    CommandName,
+    CommandRequest,
+    SessionEvent,
+    SessionEventName,
+    start_telega_session,
+)
 from telega_session import TelegaData as PackageType
 
 ##########################################################
@@ -83,7 +90,7 @@ class ComPortReader(QObject):
         """
 
         data_received = pyqtSignal(PackageType)
-        message_received = pyqtSignal(str)
+        session_event_received = pyqtSignal(object)
         error_occurred = pyqtSignal(str)
         finished = pyqtSignal()
 
@@ -207,7 +214,7 @@ class ComPortReader(QObject):
             self._reading_response_queue_thread, self._response_queue_reader = self._start_queue_reader_thread(
                 source_queue=self._response_queue,
                 queue_name='response_queue',
-                item_handler=lambda msg: self.message_received.emit(str(msg)),
+                item_handler=self._handle_session_event_data,
             )
             self._reading_data_queue_thread, self._data_queue_reader = self._start_queue_reader_thread(
                 source_queue=self._data_queue,
@@ -243,6 +250,18 @@ class ComPortReader(QObject):
             )
             thread.start()
             return thread, reader
+
+        def _handle_session_event_data(self, session_event_data: object) -> None:
+            """Валидирует событие сессии, полученное из response_queue."""
+            try:
+                session_event = SessionEvent.model_validate(session_event_data)
+            except ValidationError as err:
+                self.error_occurred.emit(
+                    f'Получено некорректное событие из response_queue: {err}'
+                )
+                return
+
+            self.session_event_received.emit(session_event)
 
         def send_command(self, command_request: CommandRequest) -> None:
             """Отправляет команду в self._command_queue.
@@ -400,7 +419,7 @@ class ComPortReader(QObject):
         self._logger = _logger
         self._worker = ComPortReader._ComPortReaderWorker(_logger)
         self._worker.data_received.connect(self.data_received.emit)
-        self._worker.message_received.connect(self._message_handler)
+        self._worker.session_event_received.connect(self._session_event_handler)
         self._worker.error_occurred.connect(self.error_occurred.emit)
         self._worker.finished.connect(self.finished.emit)
 
@@ -410,17 +429,18 @@ class ComPortReader(QObject):
         self._measuring_running_flag: bool = False
         self._is_configured: bool = False
 
-        # Словарь соответствия полученного сообщения от контроллера и его обработчиком
-        self._msg_to_handler: dict[str, Callable[[], None]] = {
-            "HANDSHAKE_DONE": self._handshake_done_handler,
-            "HANDSHAKE_FAILED": self._handshake_failed_handler,
-            "STOP_CALIBRATION": self._stop_calibration_handler,
-            "STOP_STATIC_INIT": self._stop_static_init_handler,
-            "UNKNOWN_ERROR": self._unknown_error_handler,
-            "READ_ERROR": self._read_error_handler,
-            "DEVICE_LOST": self._device_lost_handler,
-            "COMMAND_ACK_TIMEOUT": self._command_ack_timeout_handler,
-            "COMMAND_REJECTED": self._command_rejected_handler,
+        # Словарь соответствия события сессии и его обработчика.
+        self._event_to_handler: dict[SessionEventName, Callable[[SessionEvent], None]] = {
+            SessionEventName.HANDSHAKE_DONE: self._handshake_done_handler,
+            SessionEventName.HANDSHAKE_FAILED: self._handshake_failed_handler,
+            SessionEventName.STOP_CALIBRATION: self._stop_calibration_handler,
+            SessionEventName.STOP_STATIC_INIT: self._stop_static_init_handler,
+            SessionEventName.UNKNOWN_ERROR: self._unknown_error_handler,
+            SessionEventName.READ_ERROR: self._read_error_handler,
+            SessionEventName.DEVICE_LOST: self._device_lost_handler,
+            SessionEventName.COMMAND_ACK_TIMEOUT: self._command_ack_timeout_handler,
+            SessionEventName.COMMAND_REJECTED: self._command_rejected_handler,
+            SessionEventName.CONNECTION_FAILED: self._connection_failed_handler,
         }
 
     @property
@@ -449,69 +469,65 @@ class ComPortReader(QObject):
 
     # =============================================================
     # ============== Методы для обработки полученных ==============
-    # ================== сообщений от контроллера =================
+    # =================== событий сессии МК =======================
     # =============================================================
 
-    def _message_handler(self, msg: str) -> None:
-        """ Обработка полученного сообщения от контроллера """
-        self._logger.debug(f'Получено сообщение: {msg}')
-        if msg.startswith("CONNECTION_FAILED"):
-            _, _, error_info = msg.partition(":")
-            self._connection_failed_handler(error_info.strip())
+    def _session_event_handler(self, session_event: SessionEvent) -> None:
+        """Обрабатывает полученное от дочерней сессии событие."""
+        self._logger.debug(f'Получено событие сессии: {session_event.event}')
+        handler = self._event_to_handler.get(session_event.event)
+        if handler is None:
+            self._logger.warning(f'Получено неизвестное событие сессии: {session_event.event}')
             return
+        handler(session_event)
 
-        if msg in self._msg_to_handler.keys():
-            handler = self._msg_to_handler[msg]
-            handler()
-        else:
-            self._logger.warning(f'Получено сообщение от контроллера: {msg}')
-
-    def _handshake_done_handler(self) -> None:
+    def _handshake_done_handler(self, session_event: SessionEvent) -> None:
         """ Обработчик успешной процедуры рукопожатия """
         self.handshake_done.emit()
 
-    def _handshake_failed_handler(self) -> None:
+    def _handshake_failed_handler(self, session_event: SessionEvent) -> None:
         """ Обработчик ошибки процедуры рукопожатия """
         self._reset_running_flags()
         self.handshake_failed.emit()
 
-    def _connection_failed_handler(self, error_info: str) -> None:
+    def _connection_failed_handler(self, session_event: SessionEvent) -> None:
         """ Обработчик ошибки запуска подключения к МК. """
         self._reset_running_flags()
-        message = error_info or 'Не удалось подключиться к COM-порту'
+        error_info = session_event.params.get('error_info')
+        message = error_info if isinstance(error_info, str) and error_info else 'Не удалось подключиться к COM-порту'
         self.connection_failed.emit(message)
 
-    def _stop_calibration_handler(self) -> None:
+    def _stop_calibration_handler(self, session_event: SessionEvent) -> None:
         """ Обработчик завершения калибровки датчиков """
         self._calibration_running_flag = False
         self.calibration_done.emit()
 
-    def _stop_static_init_handler(self) -> None:
+    def _stop_static_init_handler(self, session_event: SessionEvent) -> None:
         """ Обработчик завершения набора статического буфера """
         self._static_init_running_flag = False
         self.static_init_done.emit()
 
-    def _unknown_error_handler(self) -> None:
+    def _unknown_error_handler(self, session_event: SessionEvent) -> None:
         """ Обработчик прерывания сбора данных """
         self._reset_running_flags()
         self.error_occurred.emit("Получена неизвестная ошибка при работе с МК")
 
-    def _read_error_handler(self) -> None:
+    def _read_error_handler(self, session_event: SessionEvent) -> None:
         """ Обработчик ошибки чтения данных """
         self._reset_running_flags()
         self.error_occurred.emit("Ошибка чтения данных из COM-порта")
 
-    def _device_lost_handler(self) -> None:
+    def _device_lost_handler(self, session_event: SessionEvent) -> None:
         """ Обработчик потери связи с устройством """
         self._reset_running_flags()
         self.error_occurred.emit("Потеряна связь с устройством")
 
-    def _command_ack_timeout_handler(self) -> None:
+    def _command_ack_timeout_handler(self, session_event: SessionEvent) -> None:
         """ Обработчик таймаута команды от МК """
         self._reset_running_flags()
         self.error_occurred.emit("Таймаут подтверждения команды от МК")
 
-    def _command_rejected_handler(self) -> None:
+    def _command_rejected_handler(self, session_event: SessionEvent) -> None:
         """ Обработчик отклонения команды МК """
         self._reset_running_flags()
         self.error_occurred.emit("МК отклонил отправленную команду")

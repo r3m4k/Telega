@@ -16,6 +16,8 @@ from .command_request import CommandRequest
 from .com_port_telega import ComPortTelega
 from .controller_telega import ControllerTelega
 from .decoder_telega import DecoderTelega, TelegaData
+from .session_event import SessionEvent
+from .session_event_name import SessionEventName
 from .start_telega_session import start_telega_session
 
 
@@ -28,6 +30,8 @@ __all__ = [
     'ControllerTelega',
     'DecoderTelega',
     'TelegaData',
+    'SessionEvent',
+    'SessionEventName',
     'start_telega_session'
 ]
 

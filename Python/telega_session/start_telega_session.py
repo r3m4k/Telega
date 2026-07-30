@@ -18,17 +18,10 @@ from async_mc_controller.logger import McLogger
 from async_mc_controller.signal_bus import McBus
 from async_mc_controller.async_mc_session import McSession
 from telega_session import ComPortTelega, DecoderTelega, ControllerTelega
+from telega_session.session_event import SessionEvent
+from telega_session.session_event_name import SessionEventName
 
 #########################
-
-async def _send_response_msg(response_queue: Queue, msg: str) -> None:
-    """Отправляет сообщение родительскому процессу через response_queue."""
-    try:
-        await asyncio.to_thread(response_queue.put, msg)
-    except Exception:
-        pass
-
-# -------------------------------------------------------------
 
 async def _run_telega_session(logger_config: LoggerConfig,
                               com_port_config: ComPortConfig,
@@ -79,7 +72,11 @@ async def _run_telega_session(logger_config: LoggerConfig,
 
     except Exception as err:
         mc_logger.error(f"Получено следующее исключение вне контекстного менеджера: {err}")
-        await _send_response_msg(response_queue, f"CONNECTION_FAILED: {err}")
+        session_event = SessionEvent(
+            event=SessionEventName.CONNECTION_FAILED,
+            params={'error_info': str(err)},
+        )
+        await asyncio.to_thread(response_queue.put, session_event.model_dump())
 
     finally:
         mc_logger.debug(str(decoder))
