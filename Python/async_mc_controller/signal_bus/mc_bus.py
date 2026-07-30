@@ -15,8 +15,6 @@ from .subscribers import (
     StopExecutingSubscriber,
     StartMeasuringSubscriber,
     StopMeasuringSubscriber,
-    StartCalibrationSubscriber,
-    StopCalibrationSubscriber,
     StartStaticInitSubscriber,
     StopStaticInitSubscriber,
     InterruptMeasuringSubscriber,
@@ -67,9 +65,7 @@ class McBus:
         Signals.STOP_EXECUTING,
         Signals.START_MEASURING,
         Signals.STOP_MEASURING,
-        Signals.START_CALIBRATION,
         Signals.START_STATIC_INIT,
-        Signals.STOP_CALIBRATION,
         Signals.STOP_STATIC_INIT,
         Signals.INTERRUPT_MEASURING,
         Signals.READ_ERROR,
@@ -188,40 +184,6 @@ class McBus:
         @staticmethod
         async def emit() -> None:
             await McBus._emit(Signals.STOP_MEASURING)
-
-    # ------------------------------------------
-
-    class StartCalibrationSignal:
-        """Эмиттится контроллером для запуска калибровки датчиков."""
-
-        @staticmethod
-        def subscribe(subscriber: StartCalibrationSubscriber) -> None:
-            McBus._signal_bus.subscribe(Signals.START_CALIBRATION, subscriber.on_start_calibration)
-
-        @staticmethod
-        def unsubscribe(subscriber: StartCalibrationSubscriber) -> None:
-            McBus._signal_bus.unsubscribe(Signals.START_CALIBRATION, subscriber.on_start_calibration)
-
-        @staticmethod
-        async def emit() -> None:
-            await McBus._emit(Signals.START_CALIBRATION)
-
-    # ------------------------------------------
-
-    class StopCalibrationSignal:
-        """Эмиттится контроллером при завершении калибровки датчиков."""
-
-        @staticmethod
-        def subscribe(subscriber: StopCalibrationSubscriber) -> None:
-            McBus._signal_bus.subscribe(Signals.STOP_CALIBRATION, subscriber.on_stop_calibration)
-
-        @staticmethod
-        def unsubscribe(subscriber: StopCalibrationSubscriber) -> None:
-            McBus._signal_bus.unsubscribe(Signals.STOP_CALIBRATION, subscriber.on_stop_calibration)
-
-        @staticmethod
-        async def emit() -> None:
-            await McBus._emit(Signals.STOP_CALIBRATION)
 
     # ------------------------------------------
 
@@ -515,9 +477,7 @@ class McBus:
         self.start_measuring = McBus.StartMeasuringSignal()
         self.stop_measuring = McBus.StopMeasuringSignal()
         self.interrupt_measuring = McBus.InterruptMeasuringSignal()
-        self.start_calibration = McBus.StartCalibrationSignal()
         self.start_static_init = McBus.StartStaticInitSignal()
-        self.stop_calibration = McBus.StopCalibrationSignal()
         self.stop_static_init = McBus.StopStaticInitSignal()
 
         # Ошибки чтения

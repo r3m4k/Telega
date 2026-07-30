@@ -58,11 +58,6 @@ class ProgramStage(ABC):
         ...
 
     @abstractmethod
-    def start_calibration(self) -> None:
-        """ Запуск калибровки датчиков """
-        ...
-
-    @abstractmethod
     def start_static_init(self) -> None:
         """ Запуск сбора статического буфера """
         ...
@@ -129,13 +124,6 @@ class MainWindow(QMainWindow):
                 self._main_window._add_error_message('Ошибка задания параметров', f'{err}')
                 QMessageBox.critical(self._main_window, 'Ошибка задания параметров!', f'{err}')
 
-        def start_calibration(self) -> None:
-            """ Запуск калибровки датчиков """
-            self._show_warning(
-                'Ошибка начала калибровки',
-                'Для начала задайте настройки com порта и параметры сохранения'
-            )
-
         def start_static_init(self) -> None:
             """ Запуск сбора статического буфера """
             self._show_warning(
@@ -148,41 +136,6 @@ class MainWindow(QMainWindow):
             self._show_warning(
                 'Ошибка начала сбора данных',
                 'Для начала задайте настройки com порта и параметры сохранения'
-            )
-
-        def stop_measuring(self) -> None:
-            """ Завершение сбора данных """
-            self._show_warning(
-                'Ошибка завершения сбора данных',
-                'Измерения ещё не запущены'
-            )
-
-    # -------------------------------------------------------------
-
-    class CalibrationState(ProgramStage):
-        """ Ожидание выполнения калибровки датчиков. """
-        name = 'ожидание выполнения калибровки'
-
-        def apply_settings(self) -> None:
-            """ Сохранение настроек com порта и параметров сохранения """
-            self._show_settings_locked_warning()
-
-        def start_calibration(self) -> None:
-            """ Запуск калибровки датчиков """
-            self._main_window._start_calibration()
-
-        def start_static_init(self) -> None:
-            """ Запуск сбора статического буфера """
-            self._show_warning(
-                'Ошибка начала набора статического буфера',
-                'Необходимо провести калибровку датчиков'
-            )
-
-        def start_measuring(self) -> None:
-            """ Запуск сбора данных """
-            self._show_warning(
-                'Ошибка начала сбора данных',
-                'Необходимо провести калибровку датчиков'
             )
 
         def stop_measuring(self) -> None:
@@ -201,25 +154,6 @@ class MainWindow(QMainWindow):
         def apply_settings(self) -> None:
             """ Сохранение настроек com порта и параметров сохранения """
             self._show_settings_locked_warning()
-
-        def start_calibration(self) -> None:
-            """ Запуск калибровки датчиков """
-            title = 'Повторная калибровка датчиков'
-            message = (
-                'Повторная калибровка сбросит текущий цикл подготовки к измерениям. '
-                'После неё потребуется заново набрать статический буфер. Продолжить?'
-            )
-            self._main_window._add_warning_message(title, message)
-            answer = QMessageBox.warning(
-                self._main_window,
-                title,
-                message,
-                QMessageBox.Ok | QMessageBox.Cancel,
-                QMessageBox.Cancel
-            )
-            if answer == QMessageBox.Ok:
-                self._main_window._add_info_message('Повторный запуск калибровки')
-                self._main_window._start_calibration()
 
         def start_static_init(self) -> None:
             """ Запуск сбора статического буфера """
@@ -248,13 +182,6 @@ class MainWindow(QMainWindow):
         def apply_settings(self) -> None:
             """ Сохранение настроек com порта и параметров сохранения """
             self._show_settings_locked_warning()
-
-        def start_calibration(self) -> None:
-            """ Запуск калибровки датчиков """
-            self._show_warning(
-                'Ошибка начала калибровки',
-                'Нельзя запускать калибровку во время набора статического буфера'
-            )
 
         def start_static_init(self) -> None:
             """ Запуск сбора статического буфера """
@@ -287,13 +214,6 @@ class MainWindow(QMainWindow):
             """ Сохранение настроек com порта и параметров сохранения """
             self._show_settings_locked_warning()
 
-        def start_calibration(self) -> None:
-            """ Запуск калибровки датчиков """
-            self._show_warning(
-                'Ошибка начала калибровки',
-                'Нельзя запускать калибровку между набором статического буфера и началом измерений'
-            )
-
         def start_static_init(self) -> None:
             """ Запуск сбора статического буфера """
             self._show_warning(
@@ -321,13 +241,6 @@ class MainWindow(QMainWindow):
         def apply_settings(self) -> None:
             """ Сохранение настроек com порта и параметров сохранения """
             self._show_settings_locked_warning()
-
-        def start_calibration(self) -> None:
-            """ Запуск калибровки датчиков """
-            self._show_warning(
-                'Ошибка начала калибровки',
-                'Нельзя запускать калибровку во время измерений'
-            )
 
         def start_static_init(self) -> None:
             """ Запуск сбора статического буфера """
@@ -370,7 +283,6 @@ class MainWindow(QMainWindow):
 
         # Зададим стадии программы
         self._setting_stage: MainWindow.SettingStage = self.SettingStage(self)
-        self._calibration_stage: MainWindow.CalibrationState = self.CalibrationState(self)
         self._ready_for_static_init_stage: MainWindow.ReadyForStaticInitState = self.ReadyForStaticInitState(self)
         self._static_init_stage: MainWindow.StaticInitState = self.StaticInitState(self)
         self._ready_for_measuring_stage: MainWindow.ReadyForMeasurementState = self.ReadyForMeasurementState(self)
@@ -387,7 +299,6 @@ class MainWindow(QMainWindow):
         self._apply_settings_button: QPushButton = self.findChild(QPushButton, "ApplySettingsButton")
 
         # Кнопки управления измерениями
-        self._start_calibration_button: QPushButton = self.findChild(QPushButton, "StartCalibrationButton")
         self._start_static_init_button: QPushButton = self.findChild(QPushButton, "StartStaticInitButton")
         self._start_measuring_button: QPushButton = self.findChild(QPushButton, "StartMeasuringButton")
         self._stop_measuring_button:  QPushButton = self.findChild(QPushButton, "StopMeasuringButton")
@@ -458,7 +369,6 @@ class MainWindow(QMainWindow):
 
     def _init_UI(self) -> None:
         # Подключим нажатие кнопок и другие сигналы к соответствующим функциям-обработчикам
-        self._start_calibration_button.clicked.connect(lambda: self._current_stage.start_calibration())
         self._start_static_init_button.clicked.connect(lambda: self._current_stage.start_static_init())
         self._start_measuring_button.clicked.connect(lambda: self._current_stage.start_measuring())
         self._stop_measuring_button.clicked.connect(lambda: self._current_stage.stop_measuring())
@@ -468,7 +378,6 @@ class MainWindow(QMainWindow):
         self._com_port_reader.handshake_done.connect(self._handshake_done)
         self._com_port_reader.handshake_failed.connect(self._handshake_failed)
         self._com_port_reader.connection_failed.connect(self._connection_failed)
-        self._com_port_reader.calibration_done.connect(self._calibration_done)
         self._com_port_reader.static_init_done.connect(self._static_init_done)
         self._com_port_reader.error_occurred.connect(self._error_handler)
         self._com_port_reader.finished.connect(self._com_port_reader_finished)
@@ -490,7 +399,6 @@ class MainWindow(QMainWindow):
     def _check_UI(self) -> bool:
         return (isinstance(self._start_measuring_button, QPushButton) and
                 isinstance(self._stop_measuring_button, QPushButton) and
-                isinstance(self._start_calibration_button, QPushButton) and
                 isinstance(self._start_static_init_button, QPushButton) and
                 isinstance(self._apply_settings_button, QPushButton) and
                 isinstance(self._msg_text_edit, QListWidget) and
@@ -556,17 +464,6 @@ class MainWindow(QMainWindow):
     def _add_error_message(self, title: str, message: str) -> None:
         """ Добавляет сообщение об ошибке в пользовательский журнал. """
         self._add_user_message('Ошибка', f'{title}: {message}')
-
-    def _start_calibration(self) -> None:
-        """ Запускает калибровку датчиков. """
-        try:
-            self._app_logger.info('Запуск калибровки датчиков')
-            self._com_port_reader.start_calibration()
-            self._set_stage(self._calibration_stage)
-            self._add_info_message('Калибровка датчиков запущена')
-        except ComPortReaderException as err:
-            self._add_error_message('Ошибка запуска калибровки', f'{err}')
-            QMessageBox.warning(self, 'Ошибка запуска калибровки', f'{err}')
 
     def _start_static_init(self) -> None:
         """ Запускает набор статического буфера. """
@@ -720,15 +617,6 @@ class MainWindow(QMainWindow):
         except OSError:
             self._error_handler('Ошибка записи CSV...')
 
-    def _calibration_done(self) -> None:
-        """ Обработка завершения калибровки датчиков. """
-        title = 'Калибровка завершена'
-        message = 'Калибровка датчиков завершена'
-        self._app_logger.info(message)
-        self._add_info_message(message)
-        self._set_stage(self._ready_for_static_init_stage)
-        QMessageBox.information(self, title, message)
-
     def _static_init_done(self) -> None:
         """ Обработка завершения набора статического буфера. """
         title = 'Статический буфер набран'
@@ -743,7 +631,7 @@ class MainWindow(QMainWindow):
         """ Обработка успешного рукопожатия с МК. """
         self._app_logger.info('Рукопожатие с МК выполнено успешно')
         self._add_info_message('Рукопожатие с МК выполнено успешно')
-        self._set_stage(self._calibration_stage)
+        self._set_stage(self._ready_for_static_init_stage)
 
     def _handshake_failed(self) -> None:
         """ Обработка ошибки рукопожатия с МК. """

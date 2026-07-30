@@ -105,38 +105,6 @@ class StopMeasuringSubscriber(Protocol):
 
 # ------------------------------------------
 
-class StartCalibrationSubscriber(Protocol):
-    """Протокол подписчика сигнала Signals.START_CALIBRATION.
-
-    Любой объект, реализующий метод on_start_calibration, может быть
-    передан в McBus.start_calibration.subscribe().
-
-    Пример реализации:
-        class ComPortTelega:
-            async def on_start_calibration(self) -> None:
-                self._telega_mc_logger.debug('Начало калибровки')
-                await self._send_command_with_ack(self._set_calibration_stage_command)
-    """
-    async def on_start_calibration(self) -> None: ...
-
-# ------------------------------------------
-
-class StopCalibrationSubscriber(Protocol):
-    """Протокол подписчика сигнала Signals.STOP_CALIBRATION.
-
-    Любой объект, реализующий метод on_stop_calibration, может быть
-    передан в McBus.stop_calibration.subscribe().
-
-    Пример реализации:
-        class ComPortTelega:
-            async def on_stop_calibration(self) -> None:
-                self._telega_mc_logger.debug('Завершение калибровки')
-                await self._send_command_with_ack(self._set_foo_stage_command)
-    """
-    async def on_stop_calibration(self) -> None: ...
-
-# ------------------------------------------
-
 class StartStaticInitSubscriber(Protocol):
     """Протокол подписчика сигнала Signals.START_STATIC_INIT.
 

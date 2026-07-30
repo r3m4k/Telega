@@ -161,24 +161,6 @@
     </property>
     <layout class="QVBoxLayout" name="Buttons">
      <item>
-      <widget class="QPushButton" name="StartCalibrationButton">
-       <property name="sizePolicy">
-        <sizepolicy hsizetype="Minimum" vsizetype="Preferred">
-         <horstretch>0</horstretch>
-         <verstretch>0</verstretch>
-        </sizepolicy>
-       </property>
-       <property name="font">
-        <font>
-         <pointsize>12</pointsize>
-        </font>
-       </property>
-       <property name="text">
-        <string>Начать калибровку датчиков</string>
-       </property>
-      </widget>
-     </item>
-     <item>
       <widget class="QPushButton" name="StartStaticInitButton">
        <property name="sizePolicy">
         <sizepolicy hsizetype="Minimum" vsizetype="Preferred">

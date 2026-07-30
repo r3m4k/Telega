@@ -45,9 +45,6 @@ class SessionNotRunning(ComPortReaderException):
 class NeedConfiguration(ComPortReaderException):
     pass
 
-class CalibrationRunning(ComPortReaderException):
-    pass
-
 class StaticInitRunning(ComPortReaderException):
     pass
 
@@ -73,7 +70,6 @@ class ComPortReader(QObject):
     handshake_done = pyqtSignal()
     handshake_failed = pyqtSignal()
     connection_failed = pyqtSignal(str)
-    calibration_done = pyqtSignal()
     static_init_done = pyqtSignal()
     error_occurred = pyqtSignal(str)
     finished = pyqtSignal()
@@ -424,7 +420,6 @@ class ComPortReader(QObject):
         self._worker.finished.connect(self.finished.emit)
 
         # Флаги состояния
-        self._calibration_running_flag: bool = False
         self._static_init_running_flag: bool = False
         self._measuring_running_flag: bool = False
         self._is_configured: bool = False
@@ -433,7 +428,6 @@ class ComPortReader(QObject):
         self._event_to_handler: dict[SessionEventName, Callable[[SessionEvent], None]] = {
             SessionEventName.HANDSHAKE_DONE: self._handshake_done_handler,
             SessionEventName.HANDSHAKE_FAILED: self._handshake_failed_handler,
-            SessionEventName.STOP_CALIBRATION: self._stop_calibration_handler,
             SessionEventName.STOP_STATIC_INIT: self._stop_static_init_handler,
             SessionEventName.UNKNOWN_ERROR: self._unknown_error_handler,
             SessionEventName.READ_ERROR: self._read_error_handler,
@@ -497,11 +491,6 @@ class ComPortReader(QObject):
         message = error_info if isinstance(error_info, str) and error_info else 'Не удалось подключиться к COM-порту'
         self.connection_failed.emit(message)
 
-    def _stop_calibration_handler(self, session_event: SessionEvent) -> None:
-        """ Обработчик завершения калибровки датчиков """
-        self._calibration_running_flag = False
-        self.calibration_done.emit()
-
     def _stop_static_init_handler(self, session_event: SessionEvent) -> None:
         """ Обработчик завершения набора статического буфера """
         self._static_init_running_flag = False
@@ -534,7 +523,6 @@ class ComPortReader(QObject):
 
     def _reset_running_flags(self) -> None:
         """Сбрасывает флаги активных процедур."""
-        self._calibration_running_flag = False
         self._static_init_running_flag = False
         self._measuring_running_flag = False
 
@@ -596,7 +584,6 @@ class ComPortReader(QObject):
 
         com_port_config = ComPortConfig(name=com_port_name, baudrate=115200)
 
-        self._calibration_running_flag = False
         self._static_init_running_flag = False
         self._measuring_running_flag = False
 
@@ -609,22 +596,6 @@ class ComPortReader(QObject):
             self._logger.exception('Ошибка конфигурирования ComPortReader, выполняется очистка ресурсов')
             self.shutdown()
             raise
-
-    def start_calibration(self) -> None:
-        """Запускает калибровку датчиков.
-
-        Raises:
-            NeedConfiguration: Если configure() ещё не был вызван.
-            SessionNotRunning: Если дочерний процесс не запущен или уже завершился.
-            CalibrationRunning: Если калибровка уже запущена.
-        """
-        self._ensure_session_running()
-        if not self._calibration_running_flag:
-            self._worker.send_command(CommandRequest(command=CommandName.START_CALIBRATION))
-            self._calibration_running_flag = True
-        else:
-            self._logger.debug("Попытка повторного запуска калибровки")
-            raise CalibrationRunning('Калибровка датчиков уже запущена!')
 
     def start_static_init(self) -> None:
         """Запускает набор статического буфера.

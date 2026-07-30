@@ -36,7 +36,7 @@ async def _run_telega_session(logger_config: LoggerConfig,
        logger_config:   Конфигурация логирования.
        com_port_config: Конфигурация COM-порта (имя, скорость).
        command_queue:   Очередь для получения команд от родителя.
-       response_queue:  Очередь для отправки ответов (HANDSHAKE_DONE, STOP_CALIBRATION...).
+       response_queue:  Очередь для отправки ответов (HANDSHAKE_DONE, STOP_STATIC_INIT...).
        data_queue:      Очередь для отправки пакетов TelegaData.
     """
 

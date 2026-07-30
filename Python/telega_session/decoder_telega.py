@@ -61,7 +61,6 @@ class DecoderTelega(DeviceDecoder[TelegaData]):
     _command_ack: str = "CONFIRM_RECEIVED_COMMAND"      # Ожидаемое подтверждение команды
     _command_rejected_msg: str = "UNKNOWN_COMMAND"      # Отказ МК: команда не распознана
 
-    _end_of_calibration_msg: str = "END_OF_CALIBRATION"     # Сообщение о завершение калибровки
     _end_of_static_init_msg: str = "END_OF_STATIC_INIT"     # Сообщение о завершение набора статического буфера
 
     # Константы форматов пакетов протокола
@@ -72,8 +71,7 @@ class DecoderTelega(DeviceDecoder[TelegaData]):
         super().__init__(signal_bus, mc_logger)
         self._telega_decoder_logger: logging.Logger = mc_logger.get_child_logger("BaseDecoder.DeviceDecoder.TelegaDecoder")
 
-        # Сохраним обработчики _end_of_calibration_msg и _end_of_static_init_msg
-        self._msg_to_handler[self._end_of_calibration_msg] = self._end_of_calibration
+        # Сохраним обработчик завершения набора статического буфера.
         self._msg_to_handler[self._end_of_static_init_msg] = self._end_of_static_init
 
         # Сохраним переданный путь к бинарному файлу
@@ -166,10 +164,6 @@ class DecoderTelega(DeviceDecoder[TelegaData]):
             temp=           bytes_to_float(byte_list[TelegaDataIndexes.temp_index: TelegaDataIndexes.temp_index + 4]),
             dpp_code=       bytes_to_int32(byte_list[TelegaDataIndexes.dpp_code_index: TelegaDataIndexes.dpp_code_index + 4])
         )
-
-    async def _end_of_calibration(self) -> None:
-        """ Процедура завершения калибровки """
-        await self._bus.stop_calibration.emit()
 
     async def _end_of_static_init(self) -> None:
         """ Процедура завершения набора статического буфера перед проездом """

@@ -76,7 +76,6 @@ class ControllerTelega(Controller):
     Список сообщений, которые могут быть отправлены в responce_queue:
     * HANDSHAKE_DONE - процедура рукопожатия выполнена успешно
     * HANDSHAKE_FAILED - процедура рукопожатия завершена с ошибкой
-    * STOP_CALIBRATION - получено сообщение от МК о завершении калибровки
     * STOP_STATIC_INIT - получено сообщение от МК о завершении набора статического буфера
     * UNKNOWN_ERROR - поймано непредвиденное исключение
     * READ_ERROR - получено исключение ReadError от AsyncComPort
@@ -112,7 +111,6 @@ class ControllerTelega(Controller):
         self._command_to_handler: dict[CommandName, Callable[[dict[str, Any]], Awaitable[None]]] = {
             CommandName.STOP_RUNNING: self._stop_running,
             CommandName.HANDSHAKE_INIT: self._handshake_init,
-            CommandName.START_CALIBRATION: self._start_calibration,
             CommandName.START_STATIC_INIT: self._start_static_init,
             CommandName.START_MEASURING: self._start_measuring,
             CommandName.STOP_MEASURING: self._stop_measuring,
@@ -128,7 +126,6 @@ class ControllerTelega(Controller):
 
         # Самостоятельная подписка на специфичные события шины
         self._bus.handshake_done.subscribe(self)
-        self._bus.stop_calibration.subscribe(self)
         self._bus.stop_static_init.subscribe(self)
         self._bus.interrupt_measuring.subscribe(self)
 
@@ -141,7 +138,6 @@ class ControllerTelega(Controller):
         """ Процедура выхода из контекстного менеджера """
 
         self._bus.handshake_done.unsubscribe(self)
-        self._bus.stop_calibration.unsubscribe(self)
         self._bus.stop_static_init.unsubscribe(self)
         self._bus.interrupt_measuring.unsubscribe(self)
 
@@ -203,11 +199,6 @@ class ControllerTelega(Controller):
         """ Инициирование процедуры рукопожатия """
         self._telega_controller_logger.debug('Инициирование процедуры рукопожатия')
         await self._bus.handshake_init.emit()
-
-    async def _start_calibration(self, params: dict[str, Any]) -> None:
-        """ Запуск калибровки датчиков """
-        self._telega_controller_logger.debug('Запуск калибровки датчиков')
-        await self._bus.start_calibration.emit()
 
     async def _start_static_init(self, params: dict[str, Any]) -> None:
         """ Запуск набора статического буфера """
@@ -311,14 +302,6 @@ class ControllerTelega(Controller):
         через response_queue.
         """
         await self._send_session_event(SessionEvent(event=SessionEventName.HANDSHAKE_DONE))
-
-    async def on_stop_calibration(self) -> None:
-        """ Обработчик сигнала STOP_CALIBRATION от декодера.
-
-        Отправка STOP_CALIBRATION родительскому процессу
-        через response_queue.
-        """
-        await self._send_session_event(SessionEvent(event=SessionEventName.STOP_CALIBRATION))
 
     async def on_stop_static_init(self) -> None:
         """ Обработчик сигнала STOP_STATIC_INIT от декодера.
