@@ -11,7 +11,7 @@
 #include "SensorScaler.hpp"
 
 /* Defines -------------------------------------------------------------------*/
-#define TrueAbsGyroVal  0.1370  // Абсолютная величина угловой скорости исходного датчика
+#define TrueAbsGyroVal  4.178074
 
 // -----------------------------------------------------------------------------
 namespace STM_CppLib{
@@ -28,10 +28,10 @@ namespace STM_CppLib{
         * OY = oy
         * OZ = oz
         * ------------------------------------------ */
-        TriaxialData gyro_data;     // [градус/сек]
+        TriaxialData gyro_data;     // [миллиградус/сек]
 
     private:
-        float gyro_multiplier;      // [dps/digit]
+        float gyro_multiplier;          // [mdps/digit]
         float gyro_scale_rate = 1.0f;    // Масштабирующий коэффициент
 
         // ---------------------------------------------------------------------
@@ -53,7 +53,7 @@ namespace STM_CppLib{
             InitStruct.Axes_Enable = L3GD20_AXES_ENABLE;                    /* Axes enable */
             InitStruct.BlockData_Update = L3GD20_BlockDataUpdate_Continous; /* Block Data Update */
             InitStruct.Endianness = L3GD20_BLE_LSB;                         /* Endian Data selection */
-            InitStruct.Full_Scale = L3GD20_FULLSCALE_500;                   /* Full Scale selection */
+            InitStruct.Full_Scale = L3GD20_FULLSCALE_250;                   /* Full Scale selection */
 
             L3GD20_Init(&InitStruct);
 
@@ -72,15 +72,15 @@ namespace STM_CppLib{
             switch (InitStruct.Full_Scale)
             {
             case L3GD20_FULLSCALE_250:
-                gyro_multiplier = 8.75 / 1000;      // [mdps/digit] -> [dps/digit]
+                gyro_multiplier = 8.75;      // [mdps/digit] -> [dps/digit]
                 break;
 
             case L3GD20_FULLSCALE_500:
-                gyro_multiplier = 17.5 / 1000;      // [mdps/digit] -> [dps/digit]
+                gyro_multiplier = 17.5;      // [mdps/digit] -> [dps/digit]
                 break;    
 
             case L3GD20_FULLSCALE_2000:
-                gyro_multiplier = 70.0 / 1000;      // [mdps/digit] -> [dps/digit]
+                gyro_multiplier = 70.0;      // [mdps/digit] -> [dps/digit]
                 break; 
             }
 

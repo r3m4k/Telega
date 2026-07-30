@@ -3,15 +3,21 @@
     "configurations": [
         {
             "type": "cortex-debug",
-            "name": "openocd_Win",
-            "cwd": "${config:myProject.openOCD_scripts_dir}",
-            "executable": "${config:myProject.project_dir}/Debug_Win/${config:myProject.project_name}.elf",
+            "name": "OpenOCD",
+            "cwd": "${workspaceFolder}",
+            "executable": "${workspaceFolder}/${config:myProject.Debug_Win_dir}/${config:myProject.project_name}.elf",
             "servertype": "openocd",
+            "serverpath": "${config:cortex-debug.openocdPath}",
+            "gdbPath": "${config:cortex-debug.gdbPath.windows}",
             "request": "launch",
             "configFiles": [
-                "${config:myProject.stm32f3discovery_cfg_path}"
+                "board/stm32f3discovery.cfg"
+            ],
+            "searchDir": [
+                "${config:embeddedDebug.openocdScriptsDir}"
             ],
             "svdFile":"${workspaceFolder}/STM32F303.svd",
+            "preLaunchTask": "Пересборка файлов пользователя и линковка проекта"
         }
     ]
 }
