@@ -1,3 +1,5 @@
+"""Главное окно приложения путеизмерительной тележки."""
+
 # System imports
 import logging
 from datetime import datetime
@@ -5,7 +7,6 @@ from pathlib import Path
 from typing import Optional
 
 # External imports
-from abc import ABC, abstractmethod
 from PyQt5.QtWidgets import (
     QMainWindow, QToolButton,
     QPushButton, QApplication, QMessageBox,
@@ -13,319 +14,141 @@ from PyQt5.QtWidgets import (
     QCheckBox, QListWidget
 )
 from PyQt5.uic import loadUi
-from PyQt5.QtGui import QIcon, QIntValidator
+from PyQt5.QtGui import QCloseEvent, QIcon, QIntValidator
 
 # User imports
 from logger import AppLogger
 from app_config import AppConfig, config_path
-from gui.saving_params import SavingParams, InvalidPathError, InvalidTemplateFilenameError
-from gui.com_port_settings import ComPortSettings, ComPortSettingsError
+from gui.saving_params import SavingParams
+from gui.com_port_settings import ComPortSettings
 from gui.com_port_reader import ComPortReader, ComPortReaderException
 from gui.data_visualization import DataVisualizer
 from gui.indicator_blinker import IndicatorBlinker
+from gui.program_stages import (
+    MeasuringStage,
+    ProgramStage,
+    ReadyForMeasurementStage,
+    ReadyForStaticInitStage,
+    SettingStage,
+    StaticInitStage,
+)
 from telega_session import TelegaData
 
 ##########################################################
 
-class ProgramStage(ABC):
-    """
-    Класс для описания логики отработки нажатия кнопок пользователем
-    при различных стадиях программы.
-    Реализует паттерн "Состояние" (State)
-    """
-    name: str = 'неизвестная стадия'
-
-    def __init__(self, main_window: 'MainWindow'):
-        self._main_window = main_window
-
-    def _show_warning(self, title: str, message: str) -> None:
-        """ Показывает пользователю предупреждение текущей стадии. """
-        self._main_window._add_warning_message(title, message)
-        QMessageBox.warning(self._main_window, title, message)
-
-    def _show_settings_locked_warning(self) -> None:
-        """ Предупреждает о запрете изменения настроек после запуска работы. """
-        self._show_warning(
-            'Ошибка изменения параметров сохранения',
-            'Параметры сохранения и настройки com порта '
-            'не могут быть изменены во время работы программы'
-        )
-
-    @abstractmethod
-    def apply_settings(self) -> None:
-        """ Сохранение настроек com порта и параметров сохранения """
-        ...
-
-    @abstractmethod
-    def start_static_init(self) -> None:
-        """ Запуск сбора статического буфера """
-        ...
-
-    @abstractmethod
-    def start_measuring(self) -> None:
-        """ Запуск сбора данных """
-        ...
-
-    @abstractmethod
-    def stop_measuring(self) -> None:
-        """ Завершение сбора данных """
-        ...
-
-# =============================================================
-
 class MainWindow(QMainWindow):
+    """Координирует интерфейс и пользовательские стадии работы приложения."""
+
+    # Пути к ресурсам и ограничения интерфейса
     _main_window_path: Path = Path(__file__).parent / "ui" / "main_window.ui"
     _app_icon_path: Path = Path(__file__).parent / "ui" / "telega.png"
     _messages_limit: int = 500
+
+    # Конфигурация и журналирование приложения
     _app_logger: logging.Logger
     _app_config: AppConfig
 
-    # =============================================================
-    # ===================== Внутренние классы =====================
-    # ============== для описания состояний программы =============
-    # =============================================================
+    # Стадии пользовательского сценария
+    _setting_stage: SettingStage
+    _ready_for_static_init_stage: ReadyForStaticInitStage
+    _static_init_stage: StaticInitStage
+    _ready_for_measurement_stage: ReadyForMeasurementStage
+    _measuring_stage: MeasuringStage
+    _current_stage: ProgramStage
 
-    class SettingStage(ProgramStage):
-        """ Ожидание настроек сохранения и параметров порта """
-        name = 'ожидание подтверждения настроек'
+    # Изменяемое состояние текущей сессии
+    _saving_path: Optional[Path]
+    _template_filename: Optional[str]
+    _pending_saving_stage: Optional[str]
+    _pending_saving_file: Optional[Path]
+    _measurement_stop_requested: bool
+    _session_configuration_started: bool
 
-        def apply_settings(self) -> None:
-            """ Сохранение настроек com порта и параметров сохранения """
-            if self._main_window._session_configuration_started:
-                self._show_warning(
-                    'Настройка уже запущена',
-                    'Настройка подключения уже выполняется. Дождитесь результата рукопожатия с МК'
-                )
-                return
+    # Виджеты главного окна
+    _apply_settings_button: QPushButton
+    _start_static_init_button: QPushButton
+    _start_measuring_button: QPushButton
+    _stop_measuring_button: QPushButton
+    _msg_text_edit: QListWidget
+    _passage_num_edit: QLineEdit
+    _indicator_check_box: QCheckBox
 
-            try:
-                saving_path = self._main_window._saving_params.get_saving_path()
-                template_filename = self._main_window._saving_params.get_template_filename()
-                com_port_name = self._main_window._com_port_settings.get_port_name()
+    # Компоненты интерфейса и взаимодействия с сессией
+    _saving_params: SavingParams
+    _com_port_settings: ComPortSettings
+    _com_port_reader: ComPortReader
+    _data_visualizer: DataVisualizer
+    _indicator_blinker: IndicatorBlinker
 
-                # Применим полученные параметры и заблокируем их изменение
-                self._main_window._session_configuration_started = True
-                self._main_window._add_info_message(
-                    f'Настройки применены:\n'
-                    f'COM-порт: {com_port_name}\n'
-                    f'Шаблонное название файлов: {template_filename}\n'
-                    f'Директория сохранения: {saving_path.resolve()}'
-                )
-                self._main_window._configure_session(saving_path, template_filename, com_port_name)
-                self._main_window._saving_params.lock_input()
-                self._main_window._com_port_settings.lock_input()
-                self._main_window._apply_settings_button.setEnabled(False)
-
-            except (InvalidPathError, InvalidTemplateFilenameError,
-                    ComPortSettingsError, ComPortReaderException, OSError, TypeError) as err:
-                self._main_window._session_configuration_started = False
-                self._main_window._shutdown_com_port_reader()
-                self._main_window._add_error_message('Ошибка задания параметров', f'{err}')
-                QMessageBox.critical(self._main_window, 'Ошибка задания параметров!', f'{err}')
-
-        def start_static_init(self) -> None:
-            """ Запуск сбора статического буфера """
-            self._show_warning(
-                'Ошибка начала набора статического буфера',
-                'Для начала задайте настройки com порта и параметры сохранения'
-            )
-
-        def start_measuring(self) -> None:
-            """ Запуск сбора данных """
-            self._show_warning(
-                'Ошибка начала сбора данных',
-                'Для начала задайте настройки com порта и параметры сохранения'
-            )
-
-        def stop_measuring(self) -> None:
-            """ Завершение сбора данных """
-            self._show_warning(
-                'Ошибка завершения сбора данных',
-                'Измерения ещё не запущены'
-            )
-
-    # -------------------------------------------------------------
-
-    class ReadyForStaticInitState(ProgramStage):
-        """ Готовность начать набор статического буфера. """
-        name = 'готовность начать набор статического буфера'
-
-        def apply_settings(self) -> None:
-            """ Сохранение настроек com порта и параметров сохранения """
-            self._show_settings_locked_warning()
-
-        def start_static_init(self) -> None:
-            """ Запуск сбора статического буфера """
-            self._main_window._start_static_init()
-
-        def start_measuring(self) -> None:
-            """ Запуск сбора данных """
-            self._show_warning(
-                'Ошибка начала сбора данных',
-                'Необходимо завершить набор статического буфера'
-            )
-
-        def stop_measuring(self) -> None:
-            """ Завершение сбора данных """
-            self._show_warning(
-                'Ошибка завершения сбора данных',
-                'Измерения ещё не запущены'
-            )
-
-    # -------------------------------------------------------------
-
-    class StaticInitState(ProgramStage):
-        """ Набор статического буфера уже начат. """
-        name = 'набор статического буфера уже начат'
-
-        def apply_settings(self) -> None:
-            """ Сохранение настроек com порта и параметров сохранения """
-            self._show_settings_locked_warning()
-
-        def start_static_init(self) -> None:
-            """ Запуск сбора статического буфера """
-            self._show_warning(
-                'Ошибка начала набора статического буфера',
-                'Набор статического буфера уже запущен'
-            )
-
-        def start_measuring(self) -> None:
-            """ Запуск сбора данных """
-            self._show_warning(
-                'Ошибка начала сбора данных',
-                'Необходимо завершить набор статического буфера'
-            )
-
-        def stop_measuring(self) -> None:
-            """ Завершение сбора данных """
-            self._show_warning(
-                'Ошибка завершения сбора данных',
-                'Измерения ещё не запущены'
-            )
-
-    # -------------------------------------------------------------
-
-    class ReadyForMeasurementState(ProgramStage):
-        """ Готовность начать измерение. """
-        name = 'готовность начать измерение'
-
-        def apply_settings(self) -> None:
-            """ Сохранение настроек com порта и параметров сохранения """
-            self._show_settings_locked_warning()
-
-        def start_static_init(self) -> None:
-            """ Запуск сбора статического буфера """
-            self._show_warning(
-                'Ошибка начала набора статического буфера',
-                'Статический буфер уже набран. Начните измерения или завершите текущий цикл'
-            )
-
-        def start_measuring(self) -> None:
-            """ Запуск сбора данных """
-            self._main_window._start_measuring()
-
-        def stop_measuring(self) -> None:
-            """ Завершение сбора данных """
-            self._show_warning(
-                'Ошибка завершения сбора данных',
-                'Измерения ещё не запущены'
-            )
-
-    # -------------------------------------------------------------
-
-    class MeasuringState(ProgramStage):
-        """ Измерения уже начаты. """
-        name = 'измерения уже начаты'
-
-        def apply_settings(self) -> None:
-            """ Сохранение настроек com порта и параметров сохранения """
-            self._show_settings_locked_warning()
-
-        def start_static_init(self) -> None:
-            """ Запуск сбора статического буфера """
-            self._show_warning(
-                'Ошибка начала набора статического буфера',
-                'Нельзя запускать набор статического буфера во время измерений'
-            )
-
-        def start_measuring(self) -> None:
-            """ Запуск сбора данных """
-            self._show_warning(
-                'Ошибка начала сбора данных',
-                'Измерения уже запущены'
-            )
-
-        def stop_measuring(self) -> None:
-            """ Завершение сбора данных """
-            self._main_window._stop_measuring()
-
-    # =============================================================
-
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(parent=None)
 
-        # Создадим конфигурацию приложения
+        self._init_app_context()
+        self._load_window_ui()
+        self._bind_widgets()
+        self._init_runtime_state()
+        self._create_components()
+        self._create_program_stages()
+        self._configure_controls()
+        self._connect_signals()
+        self._start_indicator()
+
+    # =============================================================
+    # ================= Инициализация главного окна ================
+    # =============================================================
+
+    def _init_app_context(self) -> None:
+        """Загружает конфигурацию и создаёт логгер главного окна."""
         self._app_config = AppConfig.load(config_path)
         self._app_config.logger_config.log_filename = "app_logger.log"
         self._app_config.logger_config.log_level = logging.DEBUG
         self._app_config.logger_config.use_console = False
-
-        # Зададим логгер приложения
         self._app_logger = AppLogger(self._app_config).get_child_logger("MainWindow")
 
-        # Загрузим разметку страницы
+    def _load_window_ui(self) -> None:
+        """Загружает разметку и задаёт параметры главного окна."""
         loadUi(self._main_window_path, self)
-
-        # Зададим название окна и иконку
         self.setWindowTitle('Путеизмерительная тележка')
         self.setWindowIcon(QIcon(str(self._app_icon_path)))
 
-        # Зададим стадии программы
-        self._setting_stage: MainWindow.SettingStage = self.SettingStage(self)
-        self._ready_for_static_init_stage: MainWindow.ReadyForStaticInitState = self.ReadyForStaticInitState(self)
-        self._static_init_stage: MainWindow.StaticInitState = self.StaticInitState(self)
-        self._ready_for_measuring_stage: MainWindow.ReadyForMeasurementState = self.ReadyForMeasurementState(self)
-        self._measuring_stage: MainWindow.MeasuringState = self.MeasuringState(self)
+    def _bind_widgets(self) -> None:
+        """Связывает поля главного окна с виджетами загруженной разметки."""
+        self._apply_settings_button = self.findChild(QPushButton, "ApplySettingsButton")
+        self._start_static_init_button = self.findChild(QPushButton, "StartStaticInitButton")
+        self._start_measuring_button = self.findChild(QPushButton, "StartMeasuringButton")
+        self._stop_measuring_button = self.findChild(QPushButton, "StopMeasuringButton")
+        self._msg_text_edit = self.findChild(QListWidget, "MessagesTextEdit")
+        self._passage_num_edit = self.findChild(QLineEdit, "Passage_Num")
+        self._indicator_check_box = self.findChild(QCheckBox, "Indicator")
 
-        self._current_stage: ProgramStage = self._setting_stage
-        self._saving_path: Optional[Path] = None
-        self._template_filename: Optional[str] = None
-        self._pending_saving_stage: Optional[str] = None
-        self._pending_saving_file: Optional[Path] = None
-        self._measurement_stop_requested: bool = False
-        self._session_configuration_started: bool = False
-        self._indicator_blinker: Optional[IndicatorBlinker] = None
+    def _init_runtime_state(self) -> None:
+        """Задаёт начальные значения изменяемого состояния окна."""
+        self._saving_path = None
+        self._template_filename = None
+        self._pending_saving_stage = None
+        self._pending_saving_file = None
+        self._measurement_stop_requested = False
+        self._session_configuration_started = False
 
-        # ------------------------------
-        # Кнопка сохранения настроек com порта и параметров сохранения
-        self._apply_settings_button: QPushButton = self.findChild(QPushButton, "ApplySettingsButton")
-
-        # Кнопки управления измерениями
-        self._start_static_init_button: QPushButton = self.findChild(QPushButton, "StartStaticInitButton")
-        self._start_measuring_button: QPushButton = self.findChild(QPushButton, "StartMeasuringButton")
-        self._stop_measuring_button:  QPushButton = self.findChild(QPushButton, "StopMeasuringButton")
-        # ------------------------------
-        self._msg_text_edit: QListWidget = self.findChild(QListWidget, "MessagesTextEdit")
-        self._passage_num_edit: QLineEdit = self.findChild(QLineEdit, "Passage_Num")
-        self._indicator_check_box: QCheckBox = self.findChild(QCheckBox, "Indicator")
-        # ------------------------------
+    def _create_components(self) -> None:
+        """Создаёт компоненты интерфейса и взаимодействия с сессией."""
         self._saving_params = SavingParams(
             app_config=self._app_config,
-            saving_path_edit = self.findChild(QLineEdit, "SavingPathEdit"),
-            choose_saving_path_button = self.findChild(QToolButton, "ChooseSavingPathButton"),
-            template_filename_edit = self.findChild(QLineEdit, "TemplateFilenameEdit"),
-            template_info_button = self.findChild(QPushButton, "TemplateInfoButton")
+            saving_path_edit=self.findChild(QLineEdit, "SavingPathEdit"),
+            choose_saving_path_button=self.findChild(
+                QToolButton,
+                "ChooseSavingPathButton",
+            ),
+            template_filename_edit=self.findChild(QLineEdit, "TemplateFilenameEdit"),
+            template_info_button=self.findChild(QPushButton, "TemplateInfoButton"),
         )
-        # ------------------------------
         self._com_port_settings = ComPortSettings(
             app_config=self._app_config,
-            com_port_combo_box = self.findChild(QComboBox, "ComPortComboBox"),
-            com_port_info_button = self.findChild(QPushButton, "ComPortInfoButton"),
-            update_com_ports_button = self.findChild(QToolButton, "UpdateComPortsButton")
+            com_port_combo_box=self.findChild(QComboBox, "ComPortComboBox"),
+            com_port_info_button=self.findChild(QPushButton, "ComPortInfoButton"),
+            update_com_ports_button=self.findChild(QToolButton, "UpdateComPortsButton"),
         )
-        # ------------------------------
-        self._com_port_reader: ComPortReader = ComPortReader(self._app_logger)
-        # ------------------------------
+        self._com_port_reader = ComPortReader(self._app_logger)
         self._data_visualizer = DataVisualizer(
             value_acc_x=self.findChild(QLCDNumber, "Value_Acc_X"),
             value_acc_y=self.findChild(QLCDNumber, "Value_Acc_Y"),
@@ -333,46 +156,43 @@ class MainWindow(QMainWindow):
             value_gyro_x=self.findChild(QLCDNumber, "Value_Gyro_X"),
             value_gyro_y=self.findChild(QLCDNumber, "Value_Gyro_Y"),
             value_gyro_z=self.findChild(QLCDNumber, "Value_Gyro_Z"),
-            dpp_code_value=self.findChild(QLCDNumber, "DppCodeValue")
+            dpp_code_value=self.findChild(QLCDNumber, "DppCodeValue"),
         )
-        # ------------------------------
-        # Настроим интерфейс
-        if not self._check_UI():
-            self._app_logger.error("Неправильно настроен main_window!")
-            QMessageBox.critical(self, "Ошибка", "Неправильно настроен main_window")
-            QApplication.quit()
-            exit(10)
+        self._indicator_blinker = IndicatorBlinker(
+            indicator=self._indicator_check_box,
+            period_ms=1000,
+            logger=self._app_logger,
+        )
 
-        self._init_UI()
-        # ------------------------------
+    def _create_program_stages(self) -> None:
+        """Создаёт стадии пользовательского сценария программы."""
+        self._setting_stage = SettingStage(self)
+        self._ready_for_static_init_stage = ReadyForStaticInitStage(self)
+        self._static_init_stage = StaticInitStage(self)
+        self._ready_for_measurement_stage = ReadyForMeasurementStage(self)
+        self._measuring_stage = MeasuringStage(self)
+        self._current_stage = self._setting_stage
 
-    def closeEvent(self, event)-> None:
-        """ Дополнительная логика перед закрытием окна """
-        self.hide()
-        try:
-            if self._indicator_blinker is not None:
-                self._indicator_blinker.stop()
-            self._shutdown_com_port_reader()
-            self._app_logger.info('Корректное завершение работы приложения')
-        except Exception as err:
-            self._app_logger.exception(f'Ошибка при завершении работы ComPortReader: {err}')
-        finally:
-            event.accept()
+    def _configure_controls(self) -> None:
+        """Задаёт начальные параметры элементов управления."""
+        self._passage_num_edit.setValidator(QIntValidator(1, 999999, self))
+        self._passage_num_edit.setReadOnly(True)
+        self._set_passage_num(1)
 
-    def _quit_app(self) -> None:
-        """ Метод для завершения работы программы """
-        if not self._com_port_reader.is_active:
-            self._app_logger.info('Корректное завершение работы приложения')
-        else:
-            self._app_logger.warning('Принудительное завершение приложения до полной остановки ComPortReader')
-        QApplication.quit()
-
-    def _init_UI(self) -> None:
-        # Подключим нажатие кнопок и другие сигналы к соответствующим функциям-обработчикам
-        self._start_static_init_button.clicked.connect(lambda: self._current_stage.start_static_init())
-        self._start_measuring_button.clicked.connect(lambda: self._current_stage.start_measuring())
-        self._stop_measuring_button.clicked.connect(lambda: self._current_stage.stop_measuring())
-        self._apply_settings_button.clicked.connect(lambda: self._current_stage.apply_settings())
+    def _connect_signals(self) -> None:
+        """Подключает сигналы интерфейса, сессии и приложения."""
+        self._start_static_init_button.clicked.connect(
+            lambda: self._current_stage.start_static_init()
+        )
+        self._start_measuring_button.clicked.connect(
+            lambda: self._current_stage.start_measuring()
+        )
+        self._stop_measuring_button.clicked.connect(
+            lambda: self._current_stage.stop_measuring()
+        )
+        self._apply_settings_button.clicked.connect(
+            lambda: self._current_stage.apply_settings()
+        )
 
         self._com_port_reader.data_received.connect(self._data_received)
         self._com_port_reader.handshake_done.connect(self._handshake_done)
@@ -384,45 +204,54 @@ class MainWindow(QMainWindow):
         self._com_port_reader.error_occurred.connect(self._error_handler)
         self._com_port_reader.finished.connect(self._com_port_reader_finished)
 
-        self._passage_num_edit.setValidator(QIntValidator(1, 999999, self))
-        self._passage_num_edit.setReadOnly(True)
-        self._set_passage_num(1)
-        self._indicator_blinker = IndicatorBlinker(
-            indicator=self._indicator_check_box,
-            period_ms=1000,
-            logger=self._app_logger,
-        )
-        self._indicator_blinker.start()
-
         app = QApplication.instance()
         if app is not None:
             app.aboutToQuit.connect(self._indicator_blinker.stop)
 
-    def _check_UI(self) -> bool:
-        return (isinstance(self._start_measuring_button, QPushButton) and
-                isinstance(self._stop_measuring_button, QPushButton) and
-                isinstance(self._start_static_init_button, QPushButton) and
-                isinstance(self._apply_settings_button, QPushButton) and
-                isinstance(self._msg_text_edit, QListWidget) and
-                isinstance(self._passage_num_edit, QLineEdit) and
-                isinstance(self._indicator_check_box, QCheckBox))
-
-    def reset(self) -> None:
-        """ Сброс состояния главного окна """
-        self._shutdown_com_port_reader()
-        self._com_port_settings.reset()
-        self._set_passage_num(1)
-        self._reset_to_setting_stage()
-        self._add_info_message('Состояние главного окна сброшено')
+    def _start_indicator(self) -> None:
+        """Запускает индикатор активности приложения."""
+        self._indicator_blinker.start()
 
     # =============================================================
-    # =================== Внутренняя логика =======================
+    # =============== Завершение работы приложения ================
     # =============================================================
 
-    def _configure_session(self,
-                           saving_path: Path,
-                           template_filename: str,
-                           com_port_name: str) -> None:
+    def closeEvent(self, event: QCloseEvent) -> None:
+        """Завершает фоновые компоненты перед закрытием окна.
+
+        Args:
+            event: Событие закрытия главного окна.
+        """
+        self.hide()
+        try:
+            self._indicator_blinker.stop()
+            self._shutdown_com_port_reader()
+            self._app_logger.info('Корректное завершение работы приложения')
+        except Exception as err:
+            self._app_logger.exception(f'Ошибка при завершении работы ComPortReader: {err}')
+        finally:
+            event.accept()
+
+    # =============================================================
+    # ================ Настройка и стадии сессии ==================
+    # =============================================================
+
+    def configure_session(self,
+                          saving_path: Path,
+                          template_filename: str,
+                          com_port_name: str) -> None:
+        """Применяет настройки и запускает сессию связи с МК.
+
+        Args:
+            saving_path: Директория сохранения данных.
+            template_filename: Шаблон имени файлов текущей сессии.
+            com_port_name: Имя используемого COM-порта.
+
+        Raises:
+            ComPortReaderException: Не удалось запустить сессию связи.
+            OSError: Не удалось сохранить настройки приложения.
+            TypeError: Переданы параметры неподдерживаемого типа.
+        """
         bin_file = saving_path / f'{template_filename}.bin'
         self._app_logger.info(
             f'Применение настроек: COM-порт={com_port_name}, файл потока={bin_file}'
@@ -432,12 +261,18 @@ class MainWindow(QMainWindow):
             com_port_name=com_port_name,
             bin_file=bin_file,
         )
-        self._saving_path = saving_path
-        self._template_filename = template_filename
-        self._set_passage_num(1)
-        self._saving_params.save_config()
-        self._com_port_settings.save_config()
-        self._add_info_message('Ожидание рукопожатия с МК')
+        try:
+            self._saving_path = saving_path
+            self._template_filename = template_filename
+            self._set_passage_num(1)
+            self._saving_params.save_config()
+            self._com_port_settings.save_config()
+            self.add_info_message('Ожидание рукопожатия с МК')
+        except Exception:
+            self._saving_path = None
+            self._template_filename = None
+            self._shutdown_com_port_reader()
+            raise
 
     def _set_stage(self, stage: ProgramStage) -> None:
         """ Переключает текущую стадию программы. """
@@ -447,6 +282,10 @@ class MainWindow(QMainWindow):
         self._current_stage = stage
         self._app_logger.info(f'Стадия программы изменена: {stage.name}')
 
+    # =============================================================
+    # ================= Пользовательский журнал ===================
+    # =============================================================
+
     def _add_user_message(self, level: str, message: str) -> None:
         """ Добавляет сообщение в пользовательский журнал главного окна. """
         timestamp = datetime.now().strftime('%H:%M:%S')
@@ -455,36 +294,54 @@ class MainWindow(QMainWindow):
             self._msg_text_edit.takeItem(0)
         self._msg_text_edit.scrollToBottom()
 
-    def _add_info_message(self, message: str) -> None:
-        """ Добавляет информационное сообщение в пользовательский журнал. """
+    def add_info_message(self, message: str) -> None:
+        """Добавляет информационное сообщение в пользовательский журнал.
+
+        Args:
+            message: Текст сообщения.
+        """
         self._add_user_message('Инфо', message)
 
-    def _add_warning_message(self, title: str, message: str) -> None:
-        """ Добавляет предупреждение в пользовательский журнал. """
+    def add_warning_message(self, title: str, message: str) -> None:
+        """Добавляет предупреждение в пользовательский журнал.
+
+        Args:
+            title: Заголовок предупреждения.
+            message: Текст предупреждения.
+        """
         self._add_user_message('Предупреждение', f'{title}: {message}')
 
-    def _add_error_message(self, title: str, message: str) -> None:
-        """ Добавляет сообщение об ошибке в пользовательский журнал. """
+    def add_error_message(self, title: str, message: str) -> None:
+        """Добавляет сообщение об ошибке в пользовательский журнал.
+
+        Args:
+            title: Заголовок ошибки.
+            message: Описание ошибки.
+        """
         self._add_user_message('Ошибка', f'{title}: {message}')
 
-    def _start_static_init(self) -> None:
-        """ Запускает набор статического буфера. """
+    # =============================================================
+    # ================= Управление измерениями ====================
+    # =============================================================
+
+    def start_static_init(self) -> None:
+        """Запрашивает подготовку CSV-файла для набора статического буфера."""
         try:
             self._request_saving_file('static_init')
         except (ComPortReaderException, OSError, TypeError, ValueError) as err:
-            self._add_error_message('Ошибка подготовки статического буфера', f'{err}')
+            self.add_error_message('Ошибка подготовки статического буфера', f'{err}')
             QMessageBox.warning(self, 'Ошибка подготовки статического буфера', f'{err}')
 
-    def _start_measuring(self) -> None:
-        """ Запускает сбор данных во время проезда. """
+    def start_measuring(self) -> None:
+        """Запрашивает подготовку CSV-файла для измерительного проезда."""
         try:
             self._request_saving_file('measuring')
         except (ComPortReaderException, OSError, TypeError, ValueError) as err:
-            self._add_error_message('Ошибка подготовки измерений', f'{err}')
+            self.add_error_message('Ошибка подготовки измерений', f'{err}')
             QMessageBox.warning(self, 'Ошибка подготовки измерений', f'{err}')
 
-    def _stop_measuring(self) -> None:
-        """ Завершает сбор данных во время проезда. """
+    def stop_measuring(self) -> None:
+        """Запрашивает завершение сбора данных во время проезда."""
         if self._measurement_stop_requested:
             return
 
@@ -493,16 +350,19 @@ class MainWindow(QMainWindow):
             self._app_logger.info(f'Завершение измерений для проезда {passage_num}')
             self._com_port_reader.stop_measuring()
             self._measurement_stop_requested = True
-            self._add_info_message(f'Ожидание завершения измерений для проезда #{passage_num}')
+            self.add_info_message(f'Ожидание завершения измерений для проезда #{passage_num}')
         except ComPortReaderException as err:
-            self._add_error_message('Ошибка завершения сбора данных', f'{err}')
+            self.add_error_message('Ошибка завершения сбора данных', f'{err}')
             QMessageBox.warning(self, 'Ошибка завершения сбора данных', f'{err}')
 
     def _request_saving_file(self, stage_name: str) -> None:
-        """Запрашивает подготовку CSV-файла перед запуском этапа.
+        """Запрашивает подготовку CSV-файла и запоминает ожидающий запуска этап.
+
+        Этап запускается только после успешного получения результата
+        SET_SAVING_FILE, поэтому его имя сохраняется до обработки ответа.
 
         Args:
-            stage_name: Имя этапа в формируемом имени CSV-файла.
+            stage_name: Имя этапа для формирования имени файла и последующего запуска.
 
         Raises:
             ComPortReaderException: Если параметры сохранения не заданы или
@@ -523,39 +383,37 @@ class MainWindow(QMainWindow):
         self._app_logger.info(f'Запрошена подготовка CSV-файла: {file_path}')
         self._com_port_reader.set_saving_file(file_path)
 
-    def _get_passage_num(self) -> int:
-        """ Возвращает номер текущего проезда. """
-        passage_num = self._passage_num_edit.text().strip()
-        if not passage_num:
-            return 1
-        try:
-            return max(1, int(passage_num))
-        except ValueError:
-            self._app_logger.warning(f'Некорректный номер проезда: {passage_num}')
-            self._add_warning_message(
-                'Некорректный номер проезда',
-                f'Некорректный номер проезда {passage_num}; установлен номер 1'
-            )
-            self._set_passage_num(1)
-            return 1
+    # =============================================================
+    # ============= Обработка ошибок и сброс сессии ===============
+    # =============================================================
 
-    def _set_passage_num(self, passage_num: int) -> None:
-        """ Задаёт номер текущего проезда. """
-        self._passage_num_edit.setText(str(max(1, passage_num)))
+    def _handle_session_failure(self,
+                                title: str,
+                                message: str,
+                                log_message: Optional[str] = None,
+                                dialog_title: Optional[str] = None) -> None:
+        """Завершает аварийную сессию и сообщает пользователю об ошибке.
 
-    def _increment_passage_num(self) -> None:
-        """ Увеличивает номер текущего проезда. """
-        self._set_passage_num(self._get_passage_num() + 1)
-        self._app_logger.info(f'Номер текущего проезда изменён: {self._get_passage_num()}')
-        self._add_info_message(f'Текущий проезд: #{self._get_passage_num()}')
+        Args:
+            title: Заголовок сообщения в пользовательском журнале.
+            message: Описание ошибки для журнала и диалога.
+            log_message: Отдельный текст для журнала приложения.
+            dialog_title: Отдельный заголовок диалога ошибки.
+        """
+        self._app_logger.error(log_message or message)
+        self.add_error_message(title, message)
+        self._shutdown_com_port_reader()
+        self._reset_to_setting_stage()
+        QMessageBox.critical(self, dialog_title or title, message)
 
     def _error_handler(self, error_info: str) -> None:
         """ Обработка аварийной ошибки текущей сессии. """
-        self._app_logger.error(f'Получена ошибка {error_info}')
-        self._add_error_message('Ошибка выполнения', error_info)
-        self._shutdown_com_port_reader()
-        self._reset_to_setting_stage()
-        QMessageBox.critical(self, "Ошибка выполнения!", error_info)
+        self._handle_session_failure(
+            title='Ошибка выполнения',
+            message=error_info,
+            log_message=f'Получена ошибка {error_info}',
+            dialog_title='Ошибка выполнения!',
+        )
 
     def _reset_to_setting_stage(self) -> None:
         """ Возвращает главное окно к стадии настройки параметров. """
@@ -572,15 +430,16 @@ class MainWindow(QMainWindow):
         self._set_stage(self._setting_stage)
 
     def _shutdown_com_port_reader(self) -> None:
-        """ Завершает текущую сессию ComPortReader. """
-        try:
-            self._app_logger.info('Завершение текущей сессии ComPortReader')
-            self._com_port_reader.shutdown()
-        except Exception as err:
-            self._app_logger.exception(f'Ошибка при завершении работы ComPortReader: {err}')
-            self._add_error_message('Ошибка при завершении работы ComPortReader', f'{err}')
+        """Завершает текущую сессию ComPortReader.
+
+        Raises:
+            ComPortReaderException: Не удалось полностью освободить ресурсы сессии.
+        """
+        self._app_logger.info('Завершение текущей сессии ComPortReader')
+        self._com_port_reader.shutdown()
+
     # =============================================================
-    # =============== Методы для обработки сигналов ===============
+    # ================ Обработка сигналов сессии ==================
     # =============================================================
 
     def _data_received(self, package: TelegaData) -> None:
@@ -605,7 +464,7 @@ class MainWindow(QMainWindow):
         if not success:
             message = error_info or f'Не удалось подготовить CSV-файл {filepath}'
             self._app_logger.error(message)
-            self._add_error_message('Ошибка подготовки CSV-файла', message)
+            self.add_error_message('Ошибка подготовки CSV-файла', message)
             QMessageBox.warning(self, 'Ошибка подготовки CSV-файла', message)
             return
 
@@ -616,7 +475,7 @@ class MainWindow(QMainWindow):
                 )
                 self._com_port_reader.start_static_init()
                 self._set_stage(self._static_init_stage)
-                self._add_info_message(
+                self.add_info_message(
                     f'Набор статического буфера запущен для проезда #{self._get_passage_num()}'
                 )
                 return
@@ -625,7 +484,7 @@ class MainWindow(QMainWindow):
                 self._app_logger.info(f'Запуск измерений для проезда {self._get_passage_num()}')
                 self._com_port_reader.start_measuring()
                 self._set_stage(self._measuring_stage)
-                self._add_info_message(f'Измерения запущены для проезда #{self._get_passage_num()}')
+                self.add_info_message(f'Измерения запущены для проезда #{self._get_passage_num()}')
                 return
 
             raise RuntimeError(f'Неизвестный этап подготовки CSV-файла: {stage_name}')
@@ -637,8 +496,8 @@ class MainWindow(QMainWindow):
         title = 'Статический буфер набран'
         message = 'Набор статического буфера завершён'
         self._app_logger.info(message)
-        self._add_info_message(message)
-        self._set_stage(self._ready_for_measuring_stage)
+        self.add_info_message(message)
+        self._set_stage(self._ready_for_measurement_stage)
         QMessageBox.information(self, title, message)
 
     def _measuring_stopped(self) -> None:
@@ -646,34 +505,61 @@ class MainWindow(QMainWindow):
         passage_num = self._get_passage_num()
         self._measurement_stop_requested = False
         self._app_logger.info(f'Измерения завершены для проезда {passage_num}')
-        self._add_info_message(f'Измерения завершены для проезда #{passage_num}')
+        self.add_info_message(f'Измерения завершены для проезда #{passage_num}')
         self._increment_passage_num()
         self._set_stage(self._ready_for_static_init_stage)
 
     def _handshake_done(self) -> None:
         """ Обработка успешного рукопожатия с МК. """
         self._app_logger.info('Рукопожатие с МК выполнено успешно')
-        self._add_info_message('Рукопожатие с МК выполнено успешно')
+        self.add_info_message('Рукопожатие с МК выполнено успешно')
         self._set_stage(self._ready_for_static_init_stage)
 
     def _handshake_failed(self) -> None:
         """ Обработка ошибки рукопожатия с МК. """
-        self._app_logger.error('Ошибка рукопожатия с МК')
-        self._add_error_message('Ошибка подключения', 'Не удалось выполнить рукопожатие с МК')
-        self._shutdown_com_port_reader()
-        self._reset_to_setting_stage()
-        QMessageBox.critical(self, 'Ошибка подключения', 'Не удалось выполнить рукопожатие с МК')
+        self._handle_session_failure(
+            title='Ошибка подключения',
+            message='Не удалось выполнить рукопожатие с МК',
+            log_message='Ошибка рукопожатия с МК',
+        )
 
     def _connection_failed(self, error_info: str) -> None:
         """ Обработка ошибки запуска подключения к МК. """
         title = 'Ошибка подключения'
         message = f'Не удалось подключиться к COM-порту:\n{error_info}'
-        self._app_logger.error(message)
-        self._add_error_message(title, message)
-        self._shutdown_com_port_reader()
-        self._reset_to_setting_stage()
-        QMessageBox.critical(self, title, message)
+        self._handle_session_failure(title=title, message=message)
 
     def _com_port_reader_finished(self) -> None:
         """ Обработка завершения работы ComPortReader. """
         self._app_logger.info('ComPortReader завершил работу')
+
+    # =============================================================
+    # ================ Управление номером проезда =================
+    # =============================================================
+
+    def _get_passage_num(self) -> int:
+        """ Возвращает номер текущего проезда. """
+        passage_num = self._passage_num_edit.text().strip()
+        if not passage_num:
+            return 1
+        try:
+            return max(1, int(passage_num))
+        except ValueError:
+            self._app_logger.warning(f'Некорректный номер проезда: {passage_num}')
+            self.add_warning_message(
+                'Некорректный номер проезда',
+                f'Некорректный номер проезда {passage_num}; установлен номер 1'
+            )
+            self._set_passage_num(1)
+            return 1
+
+    def _set_passage_num(self, passage_num: int) -> None:
+        """ Задаёт номер текущего проезда. """
+        self._passage_num_edit.setText(str(max(1, passage_num)))
+
+    def _increment_passage_num(self) -> None:
+        """ Увеличивает номер текущего проезда. """
+        next_passage_num = self._get_passage_num() + 1
+        self._set_passage_num(next_passage_num)
+        self._app_logger.info(f'Номер текущего проезда изменён: {next_passage_num}')
+        self.add_info_message(f'Текущий проезд: #{next_passage_num}')

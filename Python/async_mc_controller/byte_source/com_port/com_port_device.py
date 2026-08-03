@@ -25,8 +25,8 @@ class AsyncComPortDevice(AsyncComPort):
     режимами работы платы:
     - При START_MEASURING эмиттит HANDSHAKE_INIT, отправляет команду
       рукопожатия и ждёт ACK через Event.
-    - При HANDSHAKE_DONE устанавливает событие рукопожатия, переводит плату
-      в режим измерения и запускает heartbeat loop.
+    - При HANDSHAKE_DONE устанавливает событие рукопожатия и, если heartbeat
+      включён в наследнике, запускает heartbeat loop.
     - Heartbeat loop периодически отправляет команду и ждёт ACK через Event.
     - При таймауте рукопожатия эмиттит HANDSHAKE_FAILED.
     - При таймауте heartbeat эмиттит DEVICE_LOST.
@@ -34,11 +34,13 @@ class AsyncComPortDevice(AsyncComPort):
     Команды на МК должны быть определены в наследнике, описывающий протокол взаимодействия с МК.
 
     Attributes:
-        _handshake_req_command (bytes):     Команда инициализации рукопожатия.
-        _heartbeat_req_command (bytes):          Команда проверки на зависание.
+        _handshake_req_command (bytes): Команда инициализации рукопожатия.
+        _heartbeat_enabled (bool):      Признак использования heartbeat устройством.
+        _heartbeat_req_command (bytes): Команда проверки на зависание.
     """
 
     _handshake_req_command: Optional[bytes] = None
+    _heartbeat_enabled: bool = False
     _heartbeat_req_command: Optional[bytes] = None
 
     def __init__(self, port_name: str, baudrate: int,
@@ -50,14 +52,21 @@ class AsyncComPortDevice(AsyncComPort):
         self._com_port_logger = mc_logger.get_child_logger("ComPort")
         self._device_logger: logging.Logger = mc_logger.get_child_logger("ComPort.Device")
 
-        if not self._handshake_req_command or not self._heartbeat_req_command:
-            raise RuntimeError("Определите в наследнике сигнатуру _handshake_req_command и _heartbeat_req_command!")
+        if not self._handshake_req_command:
+            raise RuntimeError('Определите в наследнике сигнатуру _handshake_req_command!')
+
+        if self._heartbeat_enabled and not self._heartbeat_req_command:
+            raise RuntimeError(
+                'Для устройства с heartbeat определите в наследнике '
+                'сигнатуру _heartbeat_req_command!'
+            )
 
         self._handshake_ack_event: asyncio.Event = asyncio.Event()   # Событие получения ACK рукопожатия
         self._heartbeat_ack_event: asyncio.Event = asyncio.Event()   # Событие получения ACK heartbeat
         self._command_ack_event: asyncio.Event   = asyncio.Event()   # Событие получения подтверждения команды
 
-        self._command_lock = asyncio.Lock()     # Блокировка для последовательной отправки команд с ожиданием ACK.
+        # Блокировка для последовательного обмена «запрос → ответ» с МК.
+        self._request_lock = asyncio.Lock()
 
         self._heartbeat_task: Optional[asyncio.Task] = None     # Задача heartbeat loop
         self._stop_flag: bool = False     # Флаг «остановка уже выполнена»
@@ -90,8 +99,7 @@ class AsyncComPortDevice(AsyncComPort):
         """
         # Выставим флаг остановки и отменим _heartbeat_task
         self._stop_flag = True
-        await self._cancel_task(self._heartbeat_task)
-        self._heartbeat_task = None
+        await self._stop_heartbeat()
 
         # Отпишемся от событий шины
         self._bus.stop_executing.unsubscribe(self)
@@ -115,8 +123,7 @@ class AsyncComPortDevice(AsyncComPort):
 
         Завершение задачи _heartbeat_task и выставление флага _stop_flag.
         """
-        await self._cancel_task(self._heartbeat_task)
-        self._heartbeat_task = None
+        await self._stop_heartbeat()
 
         await self._cancel_task(self._reading_task)
         self._reading_task = None
@@ -128,25 +135,24 @@ class AsyncComPortDevice(AsyncComPort):
 
         Инициирует процедуру рукопожатия.
         """
-        self._device_logger.debug(f'Инициализация рукопожатия по порту {self._port_name}')
-        await self._send_command(self._handshake_req_command)
+        async with self._request_lock:
+            self._device_logger.debug(f'Инициализация рукопожатия по порту {self._port_name}')
+            self._handshake_ack_event.clear()
+            await self._send_command(self._handshake_req_command)
 
-        self._handshake_ack_event.clear()
-        try:
-            await asyncio.wait_for(
-                self._handshake_ack_event.wait(),
-                timeout=_RESPONSE_TIMEOUT
-            )
+            try:
+                await asyncio.wait_for(
+                    self._handshake_ack_event.wait(),
+                    timeout=_RESPONSE_TIMEOUT
+                )
+                await self._start_heartbeat()
 
-            # Запустим _heartbeat_loop
-            self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
-
-        except asyncio.TimeoutError:
-            self._device_logger.error(
-                f'Таймаут рукопожатия по порту {self._port_name} '
-                f'({_RESPONSE_TIMEOUT} сек) — рукопожатие не выполнено'
-            )
-            await self._bus.handshake_failed.emit()
+            except asyncio.TimeoutError:
+                self._device_logger.error(
+                    f'Таймаут рукопожатия по порту {self._port_name} '
+                    f'({_RESPONSE_TIMEOUT} сек) — рукопожатие не выполнено'
+                )
+                await self._bus.handshake_failed.emit()
 
     async def on_handshake_done(self) -> None:
         """Обработчик сигнала HANDSHAKE_DONE от декодера.
@@ -208,14 +214,31 @@ class AsyncComPortDevice(AsyncComPort):
 
         self._stop_flag = True
         self._device_logger.warning(f'Аварийная остановка работы с портом {self._port_name}')
-        await self._cancel_task(self._heartbeat_task)
-        self._heartbeat_task = None
+        await self._stop_heartbeat()
 
         self._command_ack_event.set()
 
     # =============================================================
     # =================== Внутренняя логика =======================
     # =============================================================
+
+    async def _start_heartbeat(self) -> None:
+        """Запускает периодическую проверку доступности МК.
+
+        Запуск возможен только для устройств, включивших `_heartbeat_enabled`.
+        Перед созданием новой задачи останавливает предыдущую, чтобы повторное
+        рукопожатие не создало два параллельных heartbeat loop.
+        """
+        if not self._heartbeat_enabled:
+            return
+
+        await self._stop_heartbeat()
+        self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+
+    async def _stop_heartbeat(self) -> None:
+        """Останавливает периодическую проверку доступности МК."""
+        await self._cancel_task(self._heartbeat_task)
+        self._heartbeat_task = None
 
     async def _heartbeat_loop(self) -> None:
         """Периодическая отправка heartbeat команды и ожидание ACK.
@@ -230,23 +253,27 @@ class AsyncComPortDevice(AsyncComPort):
             while True:
                 await asyncio.sleep(_HEARTBEAT_PERIOD)
 
-                self._device_logger.debug(f'Отправка heartbeat по порту {self._port_name}')
-                self._heartbeat_ack_event.clear()
-                await self._bus.heartbeat_sent.emit()
-                await self._send_command(self._heartbeat_req_command)
-                try:
-                    await asyncio.wait_for(
-                        self._heartbeat_ack_event.wait(),
-                        timeout=_RESPONSE_TIMEOUT
-                    )
-                except asyncio.TimeoutError:
-                    self._device_logger.error(
-                        f'Таймаут heartbeat по порту {self._port_name} '
-                        f'({_RESPONSE_TIMEOUT} сек) — устройство не отвечает'
-                    )
-                    self._stop_flag = True
-                    await self._bus.device_lost.emit()
-                    return
+                async with self._request_lock:
+                    if self._stop_flag:
+                        return
+
+                    self._device_logger.debug(f'Отправка heartbeat по порту {self._port_name}')
+                    self._heartbeat_ack_event.clear()
+                    await self._bus.heartbeat_sent.emit()
+                    await self._send_command(self._heartbeat_req_command)
+                    try:
+                        await asyncio.wait_for(
+                            self._heartbeat_ack_event.wait(),
+                            timeout=_RESPONSE_TIMEOUT
+                        )
+                    except asyncio.TimeoutError:
+                        self._device_logger.error(
+                            f'Таймаут heartbeat по порту {self._port_name} '
+                            f'({_RESPONSE_TIMEOUT} сек) — устройство не отвечает'
+                        )
+                        self._stop_flag = True
+                        await self._bus.device_lost.emit()
+                        return
 
         except asyncio.CancelledError:
             self._device_logger.debug(f'Heartbeat loop остановлен по порту {self._port_name}')
@@ -279,10 +306,9 @@ class AsyncComPortDevice(AsyncComPort):
     async def _send_command_with_ack(self, command: bytes) -> None:
         """Отправка команды с ожиданием подтверждения от МК.
 
-        Метод сериализует отправку команд с помощью `self._command_lock`:
-        одновременно может выполняться только одна команда, ожидающая ACK.
-        Это исключает гонки за `_command_ack_event` и перепутывание
-        подтверждений от разных команд.
+        Метод сериализует обмен с помощью `self._request_lock`: одновременно
+        может выполняться только один запрос, ожидающий ответ от МК. Это
+        исключает гонки между командами и heartbeat за состоянием декодера.
 
         Если установлен флаг `self._stop_flag`, команда не отправляется,
         а в лог выводится предупреждение.
@@ -301,7 +327,7 @@ class AsyncComPortDevice(AsyncComPort):
         Args:
             command (bytes): Команда для отправки на плату МК.
         """
-        async with self._command_lock:
+        async with self._request_lock:
             if self._stop_flag:
                 self._device_logger.warning(f"Общение с МК остановлено, команда {command} не отправлена")
                 return

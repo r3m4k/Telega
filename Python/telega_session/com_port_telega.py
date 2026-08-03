@@ -12,9 +12,11 @@ from .packet_builders import PacketBuilderTelegaText, PacketBuilderTelegaBytes
 #########################
 
 class ComPortTelega(AsyncComPortDevice):
+    _heartbeat_enabled: bool = True
+
     # Команды, отправляемые на МК
-    _handshake_req_command: bytes = PacketBuilderTelegaText.build_text_command('HANDSHAKE_ACK')
-    _heartbeat_req_command: bytes = PacketBuilderTelegaText.build_text_command('HEARTBEAT_ACK')
+    _handshake_req_command: bytes = PacketBuilderTelegaText.build_text_command('HANDSHAKE_REQ')
+    _heartbeat_req_command: bytes = PacketBuilderTelegaText.build_text_command('HEARTBEAT_REQ')
 
     _restart_command: bytes = PacketBuilderTelegaBytes.build_byte_command(bytes([0xFF, 0xFF]))
 
@@ -66,6 +68,7 @@ class ComPortTelega(AsyncComPortDevice):
             )
             return
 
+        self._discard_pending_port_input()
         await self._send_command_with_ack(self._set_foo_stage_command)
         await super().on_stop_executing()
 
