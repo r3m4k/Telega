@@ -21,7 +21,6 @@ from app_config import AppConfig, config_path
 from gui.saving_params import SavingParams, InvalidPathError, InvalidTemplateFilenameError
 from gui.com_port_settings import ComPortSettings, ComPortSettingsError
 from gui.com_port_reader import ComPortReader, ComPortReaderException
-from gui.data_storage import DataStorage
 from gui.data_visualization import DataVisualizer
 from gui.indicator_blinker import IndicatorBlinker
 from telega_session import TelegaData
@@ -291,6 +290,9 @@ class MainWindow(QMainWindow):
         self._current_stage: ProgramStage = self._setting_stage
         self._saving_path: Optional[Path] = None
         self._template_filename: Optional[str] = None
+        self._pending_saving_stage: Optional[str] = None
+        self._pending_saving_file: Optional[Path] = None
+        self._measurement_stop_requested: bool = False
         self._session_configuration_started: bool = False
         self._indicator_blinker: Optional[IndicatorBlinker] = None
 
@@ -323,8 +325,6 @@ class MainWindow(QMainWindow):
         )
         # ------------------------------
         self._com_port_reader: ComPortReader = ComPortReader(self._app_logger)
-        # ------------------------------
-        self._data_storage = DataStorage()
         # ------------------------------
         self._data_visualizer = DataVisualizer(
             value_acc_x=self.findChild(QLCDNumber, "Value_Acc_X"),
@@ -378,7 +378,9 @@ class MainWindow(QMainWindow):
         self._com_port_reader.handshake_done.connect(self._handshake_done)
         self._com_port_reader.handshake_failed.connect(self._handshake_failed)
         self._com_port_reader.connection_failed.connect(self._connection_failed)
+        self._com_port_reader.saving_file_result.connect(self._saving_file_result)
         self._com_port_reader.static_init_done.connect(self._static_init_done)
+        self._com_port_reader.measuring_stopped.connect(self._measuring_stopped)
         self._com_port_reader.error_occurred.connect(self._error_handler)
         self._com_port_reader.finished.connect(self._com_port_reader_finished)
 
@@ -467,87 +469,59 @@ class MainWindow(QMainWindow):
 
     def _start_static_init(self) -> None:
         """ Запускает набор статического буфера. """
-        storage_opened = False
         try:
-            storage_opened = self._prepare_static_init_storage()
-            self._app_logger.info(
-                f'Запуск набора статического буфера для проезда {self._get_passage_num()}'
-            )
-            self._com_port_reader.start_static_init()
-            self._set_stage(self._static_init_stage)
-            self._add_info_message(
-                f'Набор статического буфера запущен для проезда #{self._get_passage_num()}'
-            )
-        except (ComPortReaderException, OSError, TypeError) as err:
-            if storage_opened:
-                self._close_current_data_file()
-            self._add_error_message('Ошибка запуска набора статического буфера', f'{err}')
-            QMessageBox.warning(self, 'Ошибка запуска набора статического буфера', f'{err}')
+            self._request_saving_file('static_init')
+        except (ComPortReaderException, OSError, TypeError, ValueError) as err:
+            self._add_error_message('Ошибка подготовки статического буфера', f'{err}')
+            QMessageBox.warning(self, 'Ошибка подготовки статического буфера', f'{err}')
 
     def _start_measuring(self) -> None:
         """ Запускает сбор данных во время проезда. """
-        storage_opened = False
         try:
-            storage_opened = self._prepare_measuring_storage()
-            self._app_logger.info(f'Запуск измерений для проезда {self._get_passage_num()}')
-            self._com_port_reader.start_measuring()
-            self._set_stage(self._measuring_stage)
-            self._add_info_message(f'Измерения запущены для проезда #{self._get_passage_num()}')
-        except (ComPortReaderException, OSError, TypeError) as err:
-            if storage_opened:
-                self._close_current_data_file()
-            self._add_error_message('Ошибка запуска сбора данных', f'{err}')
-            QMessageBox.warning(self, 'Ошибка запуска сбора данных', f'{err}')
+            self._request_saving_file('measuring')
+        except (ComPortReaderException, OSError, TypeError, ValueError) as err:
+            self._add_error_message('Ошибка подготовки измерений', f'{err}')
+            QMessageBox.warning(self, 'Ошибка подготовки измерений', f'{err}')
 
     def _stop_measuring(self) -> None:
         """ Завершает сбор данных во время проезда. """
+        if self._measurement_stop_requested:
+            return
+
         try:
             passage_num = self._get_passage_num()
             self._app_logger.info(f'Завершение измерений для проезда {passage_num}')
             self._com_port_reader.stop_measuring()
-            self._close_current_data_file()
-            self._add_info_message(f'Измерения завершены для проезда #{passage_num}')
-            self._increment_passage_num()
-            self._set_stage(self._ready_for_static_init_stage)
+            self._measurement_stop_requested = True
+            self._add_info_message(f'Ожидание завершения измерений для проезда #{passage_num}')
         except ComPortReaderException as err:
             self._add_error_message('Ошибка завершения сбора данных', f'{err}')
             QMessageBox.warning(self, 'Ошибка завершения сбора данных', f'{err}')
 
-    def _prepare_static_init_storage(self) -> bool:
-        """ Задаёт файл хранилища для набора статического буфера. """
-        return self._set_data_storage_file('static_init')
+    def _request_saving_file(self, stage_name: str) -> None:
+        """Запрашивает подготовку CSV-файла перед запуском этапа.
 
-    def _prepare_measuring_storage(self) -> bool:
-        """ Задаёт файл хранилища для измерений. """
-        return self._set_data_storage_file('measuring')
+        Args:
+            stage_name: Имя этапа в формируемом имени CSV-файла.
 
-    def _set_data_storage_file(self, stage_name: str) -> bool:
-        """ Задаёт файл данных для текущего проезда и стадии. """
+        Raises:
+            ComPortReaderException: Если параметры сохранения не заданы или
+                предыдущая команда SET_SAVING_FILE ещё не завершилась.
+        """
         if self._saving_path is None or self._template_filename is None:
             raise ComPortReaderException('Не заданы параметры сохранения данных')
+        if self._pending_saving_stage is not None:
+            raise ComPortReaderException('Ожидается результат предыдущей команды SET_SAVING_FILE')
 
-        file_path = self._saving_path / f'{self._template_filename}_{stage_name}_{self._get_passage_num()}.csv'
-        if self._data_storage.file_path == file_path and self._data_storage.is_open:
-            return False
+        file_path = (
+            self._saving_path
+            / f'{self._template_filename}_{stage_name}_{self._get_passage_num()}.csv'
+        ).resolve()
 
-        self._app_logger.info(f'Задан файл сохранения данных: {file_path}')
-        self._data_storage.set_file(file_path)
-        return True
-
-    def _close_current_data_file(self) -> None:
-        """ Закрывает текущий файл сохранения данных. """
-        if not self._data_storage.is_open:
-            return
-
-        try:
-            file_path = self._data_storage.file_path
-            packages_count = self._data_storage.count
-            self._data_storage.close()
-            self._app_logger.info(f'Файл данных закрыт: {file_path}; записано пакетов: {packages_count}')
-        except OSError as err:
-            self._app_logger.exception(f'Ошибка закрытия файла данных: {err}')
-            self._add_error_message('Ошибка закрытия файла данных', f'{err}')
-            QMessageBox.critical(self, 'Ошибка закрытия файла данных', f'{err}')
+        self._pending_saving_stage = stage_name
+        self._pending_saving_file = file_path
+        self._app_logger.info(f'Запрошена подготовка CSV-файла: {file_path}')
+        self._com_port_reader.set_saving_file(file_path)
 
     def _get_passage_num(self) -> int:
         """ Возвращает номер текущего проезда. """
@@ -590,6 +564,9 @@ class MainWindow(QMainWindow):
         self._apply_settings_button.setEnabled(True)
         self._saving_path = None
         self._template_filename = None
+        self._pending_saving_stage = None
+        self._pending_saving_file = None
+        self._measurement_stop_requested = False
         self._session_configuration_started = False
         self._data_visualizer.reset()
         self._set_stage(self._setting_stage)
@@ -602,20 +579,58 @@ class MainWindow(QMainWindow):
         except Exception as err:
             self._app_logger.exception(f'Ошибка при завершении работы ComPortReader: {err}')
             self._add_error_message('Ошибка при завершении работы ComPortReader', f'{err}')
-        finally:
-            self._close_current_data_file()
-
     # =============================================================
     # =============== Методы для обработки сигналов ===============
     # =============================================================
 
     def _data_received(self, package: TelegaData) -> None:
-        """ Обработка полученного пакета данных от МК. """
+        """Отображает последний пакет, полученный от дочерней сессии."""
+        self._data_visualizer.visualize_package(package)
+
+    def _saving_file_result(self, success: bool, filepath: str, error_info: str) -> None:
+        """Обрабатывает результат подготовки CSV-файла в дочерней сессии."""
+        stage_name = self._pending_saving_stage
+        expected_file_path = self._pending_saving_file
+        self._pending_saving_stage = None
+        self._pending_saving_file = None
+
+        if stage_name is None or expected_file_path is None:
+            self._app_logger.warning(f'Получен неожиданный результат SET_SAVING_FILE: {filepath}')
+            return
+        if filepath != str(expected_file_path):
+            self._app_logger.warning(
+                f'Получен результат SET_SAVING_FILE для другого файла: {filepath}'
+            )
+            return
+        if not success:
+            message = error_info or f'Не удалось подготовить CSV-файл {filepath}'
+            self._app_logger.error(message)
+            self._add_error_message('Ошибка подготовки CSV-файла', message)
+            QMessageBox.warning(self, 'Ошибка подготовки CSV-файла', message)
+            return
+
         try:
-            self._data_storage.add_package(package)
-            self._data_visualizer.visualize_package(package)
-        except OSError:
-            self._error_handler('Ошибка записи CSV...')
+            if stage_name == 'static_init':
+                self._app_logger.info(
+                    f'Запуск набора статического буфера для проезда {self._get_passage_num()}'
+                )
+                self._com_port_reader.start_static_init()
+                self._set_stage(self._static_init_stage)
+                self._add_info_message(
+                    f'Набор статического буфера запущен для проезда #{self._get_passage_num()}'
+                )
+                return
+
+            if stage_name == 'measuring':
+                self._app_logger.info(f'Запуск измерений для проезда {self._get_passage_num()}')
+                self._com_port_reader.start_measuring()
+                self._set_stage(self._measuring_stage)
+                self._add_info_message(f'Измерения запущены для проезда #{self._get_passage_num()}')
+                return
+
+            raise RuntimeError(f'Неизвестный этап подготовки CSV-файла: {stage_name}')
+        except ComPortReaderException as err:
+            self._error_handler(f'Не удалось запустить этап после подготовки CSV-файла: {err}')
 
     def _static_init_done(self) -> None:
         """ Обработка завершения набора статического буфера. """
@@ -623,9 +638,17 @@ class MainWindow(QMainWindow):
         message = 'Набор статического буфера завершён'
         self._app_logger.info(message)
         self._add_info_message(message)
-        self._close_current_data_file()
         self._set_stage(self._ready_for_measuring_stage)
         QMessageBox.information(self, title, message)
+
+    def _measuring_stopped(self) -> None:
+        """Обрабатывает завершение измерения после закрытия CSV-файла."""
+        passage_num = self._get_passage_num()
+        self._measurement_stop_requested = False
+        self._app_logger.info(f'Измерения завершены для проезда {passage_num}')
+        self._add_info_message(f'Измерения завершены для проезда #{passage_num}')
+        self._increment_passage_num()
+        self._set_stage(self._ready_for_static_init_stage)
 
     def _handshake_done(self) -> None:
         """ Обработка успешного рукопожатия с МК. """

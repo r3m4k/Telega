@@ -58,8 +58,14 @@ async def _run_telega_session(logger_config: LoggerConfig,
     decoder: DecoderTelega = DecoderTelega(bus, mc_logger)
     decoder.setup_bin_file(bin_file)
 
-    controller: ControllerTelega = ControllerTelega(bus, mc_logger, command_queue,
-                                                    response_queue, data_queue)
+    controller: ControllerTelega = ControllerTelega(
+        bus,
+        mc_logger,
+        decoder,
+        command_queue,
+        response_queue,
+        data_queue,
+    )
 
     # ------------------------------------------
     # Запуск сессии.

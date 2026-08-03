@@ -52,7 +52,7 @@ class PackageReadySubscriber(Protocol):
     Пример реализации:
         class Controller:
             async def on_package_ready(self, data: ImuData) -> None:
-                self._received_data.append(data)
+                self._last_data = data
     """
     async def on_package_ready(self, data) -> None: ...
 

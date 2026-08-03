@@ -522,11 +522,13 @@ class ComPortReader(QObject):
     только конфигурацию и активность дочерней сессии.
 
     Сигналы:
-        data_received(PackageType): Получен пакет измерений.
+        data_received(PackageType): Последний пакет измерений для отображения.
         handshake_done(): Рукопожатие успешно завершено.
         handshake_failed(): Рукопожатие завершилось ошибкой.
         connection_failed(str): Не удалось открыть COM-порт.
+        saving_file_result(bool, str, str): Результат подготовки CSV-файла.
         static_init_done(): Набор статического буфера завершён.
+        measuring_stopped(): Измерения завершены, CSV-файл закрыт.
         error_occurred(str): Возникла аварийная ошибка сессии или транспорта.
         finished(): Ресурсы процесса и IPC освобождены.
 
@@ -538,7 +540,9 @@ class ComPortReader(QObject):
     handshake_done = pyqtSignal()
     handshake_failed = pyqtSignal()
     connection_failed = pyqtSignal(str)
+    saving_file_result = pyqtSignal(bool, str, str)
     static_init_done = pyqtSignal()
+    measuring_stopped = pyqtSignal()
     error_occurred = pyqtSignal(str)
     finished = pyqtSignal()
 
@@ -548,6 +552,7 @@ class ComPortReader(QObject):
         SessionEventName.DEVICE_LOST: 'Потеряна связь с устройством',
         SessionEventName.COMMAND_ACK_TIMEOUT: 'Таймаут подтверждения команды от МК',
         SessionEventName.COMMAND_REJECTED: 'МК отклонил отправленную команду',
+        SessionEventName.STORAGE_ERROR: 'Ошибка работы с CSV-файлом',
     }
 
     def __init__(self, _logger: logging.Logger):
@@ -559,6 +564,7 @@ class ComPortReader(QObject):
             SessionEventName.HANDSHAKE_DONE: self.handshake_done.emit,
             SessionEventName.HANDSHAKE_FAILED: self.handshake_failed.emit,
             SessionEventName.STOP_STATIC_INIT: self.static_init_done.emit,
+            SessionEventName.MEASURING_STOPPED: self.measuring_stopped.emit,
         }
 
         self._transport.data_received.connect(self.data_received.emit)
@@ -626,6 +632,28 @@ class ComPortReader(QObject):
         """
         self._send_session_command(CommandName.START_STATIC_INIT)
 
+    def set_saving_file(self, file_path: Path) -> None:
+        """Передаёт сессии путь нового CSV-файла.
+
+        Args:
+            file_path: Абсолютный путь к подготавливаемому CSV-файлу.
+
+        Raises:
+            TypeError: Если ``file_path`` не является :class:`Path`.
+            ValueError: Если путь не абсолютный.
+            NeedConfiguration: Параметры подключения ещё не заданы.
+            SessionNotRunning: Дочерняя сессия не выполняется.
+        """
+        if not isinstance(file_path, Path):
+            raise TypeError(f'Ожидается file_path: Path, получен {type(file_path)}')
+        if not file_path.is_absolute():
+            raise ValueError('Путь к CSV-файлу должен быть абсолютным')
+
+        self._send_session_command(
+            CommandName.SET_SAVING_FILE,
+            params={'filepath': str(file_path)},
+        )
+
     def start_measuring(self) -> None:
         """Передаёт МК команду начала измерений.
 
@@ -680,10 +708,12 @@ class ComPortReader(QObject):
     # ======================= Внутренняя логика ===================
     # =============================================================
 
-    def _send_session_command(self, command: CommandName) -> None:
+    def _send_session_command(self,
+                              command: CommandName,
+                              params: Optional[dict[str, object]] = None) -> None:
         """Проверяет сессию и передаёт ей одну команду."""
         self._ensure_session_running()
-        self._transport.send_command(CommandRequest(command=command))
+        self._transport.send_command(CommandRequest(command=command, params=params or {}))
 
     def _ensure_session_running(self) -> None:
         """Проверяет, что сессия сконфигурирована и выполняется.
@@ -722,8 +752,15 @@ class ComPortReader(QObject):
             self._connection_failed_handler(session_event)
             return
 
+        if session_event.event is SessionEventName.SET_SAVING_FILE_RESULT:
+            self._saving_file_result_handler(session_event)
+            return
+
         error_message = self._session_error_messages.get(session_event.event)
         if error_message is not None:
+            error_info = session_event.params.get('error_info')
+            if isinstance(error_info, str) and error_info:
+                error_message = f'{error_message}: {error_info}'
             self.error_occurred.emit(error_message)
             return
 
@@ -738,3 +775,19 @@ class ComPortReader(QObject):
             else 'Не удалось подключиться к COM-порту'
         )
         self.connection_failed.emit(message)
+
+    def _saving_file_result_handler(self, session_event: SessionEvent) -> None:
+        """Извлекает результат команды SET_SAVING_FILE из события сессии."""
+        success = session_event.params.get('success')
+        filepath = session_event.params.get('filepath')
+        error_info = session_event.params.get('error_info')
+
+        if not isinstance(success, bool) or not isinstance(filepath, str):
+            self.error_occurred.emit('Получен некорректный результат команды SET_SAVING_FILE')
+            return
+
+        self.saving_file_result.emit(
+            success,
+            filepath,
+            error_info if isinstance(error_info, str) else '',
+        )

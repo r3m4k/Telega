@@ -3,6 +3,7 @@ import asyncio
 import logging
 from enum import IntEnum
 from multiprocessing import Queue
+from pathlib import Path
 from queue import Empty
 from typing import Any, Callable, Awaitable, Optional
 
@@ -16,13 +17,15 @@ from async_mc_controller.byte_source.read_error import ReadError
 from async_mc_controller.controller import Controller
 from telega_session.command_name import CommandName
 from telega_session.command_request import CommandRequest
-from telega_session.decoder_telega import TelegaData
+from telega_session.data_storage import AsyncDataStorageWriter, DataStorageError
+from telega_session.decoder_telega import DecoderTelega, TelegaData
 from telega_session.session_event import SessionEvent
 from telega_session.session_event_name import SessionEventName
 
 #########################
 
 _RESPONSE_TIMEOUT: float = 2.0    # Таймаут выставления событий
+_GUI_PACKAGE_PERIOD: float = 0.5  # Период отправки последнего пакета в GUI
 
 # ----------------------------------------------------------------
 
@@ -83,7 +86,7 @@ class ControllerTelega(Controller):
     * COMMAND_ACK_TIMEOUT - таймаут подтверждения получения команды МК
     * COMMAND_REJECTED - МК получил неизвестную ему команду
     """
-    def __init__(self, bus: McBus, mc_logger: McLogger,
+    def __init__(self, bus: McBus, mc_logger: McLogger, decoder: DecoderTelega,
                  command_queue: Queue, response_queue: Queue, data_queue: Queue):
 
         # Вызов родительского конструктора
@@ -103,6 +106,15 @@ class ControllerTelega(Controller):
         self._command_queue = command_queue
         self._response_queue = response_queue
         self._data_queue = data_queue
+        self._decoder: DecoderTelega = decoder
+
+        # Хранилище и задача записи пакетов в CSV
+        self._data_writer: AsyncDataStorageWriter = AsyncDataStorageWriter(self._on_storage_error)
+
+        # Последний пакет для низкочастотной отправки в GUI
+        self._latest_package: Optional[TelegaData] = None
+        self._latest_package_version: int = 0
+        self._package_publishing_task: Optional[asyncio.Task] = None
 
         # Таска по чтению очереди команд от родительского процесса
         self._reading_cmd_queue_task: Optional[asyncio.Task] = None
@@ -111,6 +123,7 @@ class ControllerTelega(Controller):
         self._command_to_handler: dict[CommandName, Callable[[dict[str, Any]], Awaitable[None]]] = {
             CommandName.STOP_RUNNING: self._stop_running,
             CommandName.HANDSHAKE_INIT: self._handshake_init,
+            CommandName.SET_SAVING_FILE: self._set_saving_file,
             CommandName.START_STATIC_INIT: self._start_static_init,
             CommandName.START_MEASURING: self._start_measuring,
             CommandName.STOP_MEASURING: self._stop_measuring,
@@ -122,6 +135,8 @@ class ControllerTelega(Controller):
 
     async def __aenter__(self) -> 'Controller':
         """ Процедура входа в контекстный менеджера """
+        await self._data_writer.start()
+        self._package_publishing_task = asyncio.create_task(self._package_publishing_loop())
         await super().__aenter__()
 
         # Самостоятельная подписка на специфичные события шины
@@ -144,6 +159,8 @@ class ControllerTelega(Controller):
         # Отменим задачу чтения входящих команд
         await self._cancel_task(self._reading_cmd_queue_task)
         self._reading_cmd_queue_task = None
+        await self._cancel_task(self._package_publishing_task)
+        self._package_publishing_task = None
 
         if self._telega_status_code == TelegaStatusCode.SUCCESS:
             self._telega_controller_logger.info(
@@ -158,7 +175,13 @@ class ControllerTelega(Controller):
                 f'// {self._telega_status_code_messages[self._telega_status_code]}'
             )
             self._telega_controller_logger.info("Завершение работы через INTERRUPT_MEASURING")
-            await self._bus.interrupt_measuring.emit()
+        await self._bus.interrupt_measuring.emit()
+
+        await self._close_storage()
+        try:
+            await self._data_writer.stop()
+        except (DataStorageError, OSError) as err:
+            self._telega_controller_logger.error(f'Ошибка завершения CSV-хранилища: {err}')
 
         return await super().__aexit__(exc_type, exc_val, exc_tb)
 
@@ -200,13 +223,52 @@ class ControllerTelega(Controller):
         self._telega_controller_logger.debug('Инициирование процедуры рукопожатия')
         await self._bus.handshake_init.emit()
 
+    async def _set_saving_file(self, params: dict[str, Any]) -> None:
+        """Подготавливает новый CSV-файл по команде GUI.
+
+        Args:
+            params: Параметры команды с обязательным строковым ``filepath``.
+        """
+        filepath = params.get('filepath')
+        if not isinstance(filepath, str) or not filepath:
+            await self._send_saving_file_result(
+                success=False,
+                filepath=filepath if isinstance(filepath, str) else '',
+                error_info='Параметр filepath должен быть непустой строкой',
+            )
+            return
+
+        file_path = Path(filepath)
+        if not file_path.is_absolute():
+            await self._send_saving_file_result(
+                success=False,
+                filepath=filepath,
+                error_info='Путь к CSV-файлу должен быть абсолютным',
+            )
+            return
+
+        try:
+            await self._decoder.wait_for_packages()
+            await self._data_writer.set_file(file_path)
+        except (DataStorageError, OSError) as err:
+            self._telega_controller_logger.error(f'Не удалось подготовить CSV-файл {file_path}: {err}')
+            await self._send_saving_file_result(False, str(file_path), str(err))
+            return
+
+        self._telega_controller_logger.info(f'Подготовлен CSV-файл: {file_path}')
+        await self._send_saving_file_result(True, str(file_path))
+
     async def _start_static_init(self, params: dict[str, Any]) -> None:
         """ Запуск набора статического буфера """
+        if not await self._ensure_storage_ready():
+            return
         self._telega_controller_logger.debug('Запуск набора статического буфера')
         await self._bus.start_static_init.emit()
 
     async def _start_measuring(self, params: dict[str, Any]) -> None:
         """ Запуск измерений """
+        if not await self._ensure_storage_ready():
+            return
         self._telega_controller_logger.debug('Запуск измерений')
         await self._bus.start_measuring.emit()
 
@@ -214,6 +276,8 @@ class ControllerTelega(Controller):
         """ Остановка измерений """
         self._telega_controller_logger.debug('Остановка измерений')
         await self._bus.stop_measuring.emit()
+        if await self._close_storage():
+            await self._send_session_event(SessionEvent(event=SessionEventName.MEASURING_STOPPED))
 
     async def _reading_command_queue(self):
         """Неблокирующее чтение данных из self._command_queue"""
@@ -268,7 +332,7 @@ class ControllerTelega(Controller):
             self._telega_controller_logger.debug('Таска _reading_command_queue отменена')
 
     async def _send_package(self, data_package: TelegaData) -> None:
-        """ Оправка пакета data_package в data_queue """
+        """Отправляет последний пакет в data_queue для GUI."""
         try:
             await asyncio.to_thread(self._data_queue.put, data_package)
         except Exception as e:
@@ -281,6 +345,85 @@ class ControllerTelega(Controller):
         except Exception as e:
             self._telega_controller_logger.error(f"Не удалось отправить событие в response_queue: {e}")
 
+    async def _send_saving_file_result(self,
+                                       success: bool,
+                                       filepath: str,
+                                       error_info: Optional[str] = None) -> None:
+        """Отправляет результат команды SET_SAVING_FILE в GUI.
+
+        Args:
+            success: Успешность подготовки файла.
+            filepath: Абсолютный путь к запрошенному файлу.
+            error_info: Описание ошибки при неуспешном результате.
+        """
+        params: dict[str, Any] = {'success': success, 'filepath': filepath}
+        if error_info is not None:
+            params['error_info'] = error_info
+        await self._send_session_event(
+            SessionEvent(event=SessionEventName.SET_SAVING_FILE_RESULT, params=params)
+        )
+
+    async def _package_publishing_loop(self) -> None:
+        """Отправляет в GUI только самый последний пакет не чаще раза в 500 мс."""
+        last_published_version = 0
+        try:
+            while True:
+                await asyncio.sleep(_GUI_PACKAGE_PERIOD)
+                if self._latest_package is None:
+                    continue
+                if self._latest_package_version == last_published_version:
+                    continue
+
+                await self._send_package(self._latest_package)
+                last_published_version = self._latest_package_version
+        except asyncio.CancelledError:
+            self._telega_controller_logger.debug('Таска отправки пакетов в GUI отменена')
+
+    async def _ensure_storage_ready(self) -> bool:
+        """Проверяет готовность хранилища перед запуском этапа измерений."""
+        if self._data_writer.is_open:
+            return True
+
+        await self._on_storage_error(
+            DataStorageError('Перед запуском измерений необходимо выполнить SET_SAVING_FILE'),
+            None,
+        )
+        return False
+
+    async def _close_storage(self) -> bool:
+        """Дожидается декодированных пакетов и закрывает CSV-файл.
+
+        Returns:
+            ``True``, если хранилище закрыто без ошибок.
+        """
+        try:
+            await self._decoder.wait_for_packages()
+            await self._data_writer.close()
+            return True
+        except (DataStorageError, OSError) as err:
+            await self._on_storage_error(err, self._data_writer.file_path)
+            return False
+
+    async def _on_storage_error(self, err: Exception, file_path: Optional[Path]) -> None:
+        """Сообщает об ошибке CSV и завершает текущую сессию.
+
+        Args:
+            err: Ошибка подготовки, записи или закрытия файла.
+            file_path: Путь проблемного файла, если он известен.
+        """
+        self._telega_controller_logger.error(f'Ошибка CSV-хранилища: {err}')
+        self._telega_status_code = TelegaStatusCode.UNKNOWN_ERROR
+        await self._send_session_event(
+            SessionEvent(
+                event=SessionEventName.STORAGE_ERROR,
+                params={
+                    'filepath': str(file_path) if file_path is not None else '',
+                    'error_info': str(err),
+                },
+            )
+        )
+        self._stop_event.set()
+
     # =============================================================
     # =================== Обработчики сигналов ====================
     # =============================================================
@@ -288,12 +431,17 @@ class ControllerTelega(Controller):
     async def on_package_ready(self, data_package: TelegaData) -> None:
         """Обработчик сигнала PACKAGE_READY.
 
-        Отправка полученного пакета в очередь data_queue
+        Передаёт пакет фоновому CSV-писателю и обновляет значение для GUI.
 
         Args:
             data_package: Декодированный пакет данных
         """
-        await self._send_package(data_package)
+        self._latest_package = data_package
+        self._latest_package_version += 1
+        try:
+            await self._data_writer.write_package(data_package)
+        except DataStorageError as err:
+            await self._on_storage_error(err, self._data_writer.file_path)
 
     async def on_handshake_done(self) -> None:
         """Обработчик сигнала HANDSHAKE_DONE от декодера.
@@ -309,15 +457,17 @@ class ControllerTelega(Controller):
         Отправка STOP_STATIC_INIT родительскому процессу
         через response_queue.
         """
-        await self._send_session_event(SessionEvent(event=SessionEventName.STOP_STATIC_INIT))
+        if await self._close_storage():
+            await self._send_session_event(SessionEvent(event=SessionEventName.STOP_STATIC_INIT))
 
     async def on_interrupt_measuring(self) -> None:
         """ Обработчик сигнала INTERRUPT_MEASURING.
 
         Отмена _measuring_pipeline_task.
         """
-        self._telega_status_code = TelegaStatusCode.UNKNOWN_ERROR
-        await self._send_session_event(SessionEvent(event=SessionEventName.UNKNOWN_ERROR))
+        if self._telega_status_code == TelegaStatusCode.SUCCESS:
+            self._telega_status_code = TelegaStatusCode.UNKNOWN_ERROR
+            await self._send_session_event(SessionEvent(event=SessionEventName.UNKNOWN_ERROR))
         self._stop_event.set()
 
     async def on_read_error(self, err: ReadError) -> None:
