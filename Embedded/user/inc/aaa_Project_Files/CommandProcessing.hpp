@@ -77,12 +77,12 @@ namespace Commands{
     /**
      * @brief   Отложенная команда: отправка ack на handshake.
      */
-    inline StringCommand Send_Handshake_Ack_Cmd("HANDSHAKE_ACK", send_handshake_ack, ConfirmPolicy::NotRequired);
+    inline StringCommand Send_Handshake_Ack_Cmd("HANDSHAKE_REQ", send_handshake_ack, ConfirmPolicy::NotRequired);
 
     /**
      * @brief   Отложенная команда: отправка ack на heartbeat.
      */
-    inline StringCommand Send_Heartbeat_Ack_Cmd("HEARTBEAT_ACK", send_heartbeat_ack, ConfirmPolicy::NotRequired);
+    inline StringCommand Send_Heartbeat_Ack_Cmd("HEARTBEAT_REQ", send_heartbeat_ack, ConfirmPolicy::NotRequired);
 
     /**
      * @brief   Системная команда: отправка сообщения об ошибке.
