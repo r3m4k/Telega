@@ -11,7 +11,6 @@ COM-порта, отображения информации о порте, об�
 from pathlib import Path
 
 # External imports
-from PyQt5.QtCore import QObject
 from PyQt5.QtWidgets import (QComboBox, QPushButton,
                              QMessageBox, QToolButton)
 from PyQt5.QtGui import QIcon
@@ -28,7 +27,7 @@ class ComPortSettingsError(Exception):
 
 # --------------------------------------------------------
 
-class ComPortSettings(QObject):
+class ComPortSettings:
     """Управление настройками COM-порта.
 
     Класс связывает выпадающий список портов (`QComboBox`), кнопку обновления
@@ -55,9 +54,6 @@ class ComPortSettings(QObject):
                  com_port_combo_box: QComboBox,
                  com_port_info_button: QPushButton,
                  update_com_ports_button: QToolButton):
-        # -------------------------------------------------------------
-        super().__init__()
-
         # Проверка типов переданных параметров
         if not isinstance(app_config, AppConfig):
             raise TypeError(f"Ожидается app_config: AppConfig, получен {type(app_config)}")
