@@ -57,6 +57,7 @@ class ProcessingConfig:
     output_dir: Path = Path("data_processing_results")
     csv_separator: str = r"\s+"
     output_csv_separator: str = " "
+    gyro_scale_to_deg_s: float = 1e-3  # GyroX/Y/Z -> deg/s; current firmware writes mdps.
     gravity_acceleration: float = 9.80665  # m/s**2
     p_end: Vector = field(default_factory=lambda: Vector([0.0, 0.0, 0.0]))
     save_results: bool = True
@@ -71,6 +72,8 @@ class ProcessingConfig:
         self.output_dir = Path(self.output_dir)
         if self.period <= 0:
             raise ValueError("period must be positive")
+        if self.gyro_scale_to_deg_s <= 0:
+            raise ValueError("gyro_scale_to_deg_s must be positive")
         if self.gravity_acceleration <= 0:
             raise ValueError("gravity_acceleration must be positive")
 

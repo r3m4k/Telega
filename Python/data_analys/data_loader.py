@@ -27,7 +27,8 @@ RAW_COLUMNS = [
 ]
 
 ACC_COLUMNS = ["AccX", "AccY", "AccZ"]
-GYRO_DEG_COLUMNS = ["GyroX", "GyroY", "GyroZ"]
+GYRO_RAW_COLUMNS = ["GyroX", "GyroY", "GyroZ"]
+GYRO_DEG_COLUMNS = GYRO_RAW_COLUMNS
 GYRO_RAD_COLUMNS = ["GyroRadX", "GyroRadY", "GyroRadZ"]
 
 ##########################################################
@@ -41,7 +42,8 @@ def load_run_csv(path: Union[Path, str], config: ProcessingConfig) -> RunData:
     _validate_columns(df, RAW_COLUMNS, path)
     df = _normalize_numeric_columns(df, RAW_COLUMNS, path)
     df["Time"] = (df["PackageNum"] - df["PackageNum"].iloc[0]) * config.period
-    df[GYRO_RAD_COLUMNS] = np.deg2rad(df[GYRO_DEG_COLUMNS].to_numpy(dtype=float))
+    gyro_deg_s = df[GYRO_RAW_COLUMNS].to_numpy(dtype=float) * config.gyro_scale_to_deg_s
+    df[GYRO_RAD_COLUMNS] = np.deg2rad(gyro_deg_s)
     return RunData(dataframe=df, source_path=path, period=config.period)
 
 
