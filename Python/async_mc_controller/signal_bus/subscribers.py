@@ -59,6 +59,27 @@ class PackageReadySubscriber(Protocol):
 
 # ------------------------------------------
 
+class DrainPackagesSubscriber(Protocol):
+    """Протокол подписчика сигнала Signals.DRAIN_PACKAGES.
+
+    Подписчик запрещает публикацию новых пакетов и завершает обработчик
+    только после отправки всех уже поставленных в очередь пакетов.
+    """
+    async def on_drain_packages(self) -> None: ...
+
+
+# ------------------------------------------
+
+class EnablePackagePublishingSubscriber(Protocol):
+    """Протокол подписчика Signals.ENABLE_PACKAGE_PUBLISHING.
+
+    Подписчик разрешает публикацию новых декодированных пакетов данных.
+    """
+    async def on_enable_package_publishing(self) -> None: ...
+
+
+# ------------------------------------------
+
 class StopExecutingSubscriber(Protocol):
     """Протокол подписчика сигнала Signals.STOP_EXECUTING.
 

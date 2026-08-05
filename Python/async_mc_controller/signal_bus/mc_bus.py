@@ -12,6 +12,8 @@ from .signal_bus import SignalBus
 from .subscribers import (
     NewByteSubscriber,
     PackageReadySubscriber,
+    DrainPackagesSubscriber,
+    EnablePackagePublishingSubscriber,
     StopExecutingSubscriber,
     StartMeasuringSubscriber,
     StopMeasuringSubscriber,
@@ -63,6 +65,8 @@ class McBus:
     # Высокочастотные сигналы (NEW_BYTE, PACKAGE_READY) намеренно исключены.
     _logged_signals: set[Signals] = {
         Signals.STOP_EXECUTING,
+        Signals.DRAIN_PACKAGES,
+        Signals.ENABLE_PACKAGE_PUBLISHING,
         Signals.START_MEASURING,
         Signals.STOP_MEASURING,
         Signals.START_STATIC_INIT,
@@ -133,6 +137,46 @@ class McBus:
         @staticmethod
         async def emit(data) -> None:
             await McBus._emit(Signals.PACKAGE_READY, data)
+
+    # ------------------------------------------
+
+    class DrainPackagesSignal:
+        """Запрещает новые пакеты и ожидает отправки уже поставленных в очередь."""
+
+        @staticmethod
+        def subscribe(subscriber: DrainPackagesSubscriber) -> None:
+            McBus._signal_bus.subscribe(Signals.DRAIN_PACKAGES, subscriber.on_drain_packages)
+
+        @staticmethod
+        def unsubscribe(subscriber: DrainPackagesSubscriber) -> None:
+            McBus._signal_bus.unsubscribe(Signals.DRAIN_PACKAGES, subscriber.on_drain_packages)
+
+        @staticmethod
+        async def emit() -> None:
+            await McBus._emit(Signals.DRAIN_PACKAGES)
+
+    # ------------------------------------------
+
+    class EnablePackagePublishingSignal:
+        """Разрешает публикацию новых декодированных пакетов данных."""
+
+        @staticmethod
+        def subscribe(subscriber: EnablePackagePublishingSubscriber) -> None:
+            McBus._signal_bus.subscribe(
+                Signals.ENABLE_PACKAGE_PUBLISHING,
+                subscriber.on_enable_package_publishing,
+            )
+
+        @staticmethod
+        def unsubscribe(subscriber: EnablePackagePublishingSubscriber) -> None:
+            McBus._signal_bus.unsubscribe(
+                Signals.ENABLE_PACKAGE_PUBLISHING,
+                subscriber.on_enable_package_publishing,
+            )
+
+        @staticmethod
+        async def emit() -> None:
+            await McBus._emit(Signals.ENABLE_PACKAGE_PUBLISHING)
 
     # =============================================================
     # =================== Управление измерением ===================
@@ -471,6 +515,8 @@ class McBus:
         # Передача данных
         self.new_byte = McBus.NewByteSignal()
         self.package_ready = McBus.PackageReadySignal()
+        self.drain_packages = McBus.DrainPackagesSignal()
+        self.enable_package_publishing = McBus.EnablePackagePublishingSignal()
 
         # Управление измерением
         self.stop_executing = McBus.StopExecutingSignal()

@@ -20,7 +20,7 @@ from async_mc_controller.controller import Controller
 from telega_session.command_name import CommandName
 from telega_session.command_request import CommandRequest
 from telega_session.data_storage import AsyncDataStorageWriter, DataStorageError
-from telega_session.decoder_telega import DecoderTelega, TelegaData
+from telega_session.decoder_telega import TelegaData
 from telega_session.session_event import SessionEvent
 from telega_session.session_event_name import SessionEventName
 
@@ -106,7 +106,6 @@ class ControllerTelega(Controller):
             self,
             bus: McBus,
             mc_logger: McLogger,
-            decoder: DecoderTelega,
             command_queue: Queue,
             response_queue: Queue,
             data_queue: Queue,
@@ -116,7 +115,6 @@ class ControllerTelega(Controller):
         Args:
             bus: Сигнальная шина сессии МК.
             mc_logger: Фабрика логгеров сессии.
-            decoder: Декодер протокола тележки.
             command_queue: Очередь команд родительского процесса.
             response_queue: Очередь событий для родительского процесса.
             data_queue: Очередь последних пакетов телеметрии.
@@ -139,7 +137,6 @@ class ControllerTelega(Controller):
         self._command_queue = command_queue
         self._response_queue = response_queue
         self._data_queue = data_queue
-        self._decoder: DecoderTelega = decoder
 
         # Хранилище и задача записи пакетов в CSV
         self._data_writer: AsyncDataStorageWriter = AsyncDataStorageWriter(self._on_storage_error)
@@ -328,7 +325,6 @@ class ControllerTelega(Controller):
             return
 
         try:
-            await self._decoder.wait_for_packages()
             await self._data_writer.set_file(file_path)
         except (DataStorageError, OSError) as err:
             self._telega_controller_logger.error(f'Не удалось подготовить CSV-файл {file_path}: {err}')
@@ -364,6 +360,7 @@ class ControllerTelega(Controller):
 
         try:
             self._telega_controller_logger.debug('Запуск набора статического буфера')
+            await self._bus.enable_package_publishing.emit()
             await self._bus.start_static_init.emit()
 
             if not command_result.done():
@@ -412,6 +409,7 @@ class ControllerTelega(Controller):
 
         try:
             self._telega_controller_logger.debug('Запуск измерений')
+            await self._bus.enable_package_publishing.emit()
             await self._bus.start_measuring.emit()
 
             if not command_result.done():
@@ -795,7 +793,7 @@ class ControllerTelega(Controller):
             DataStorageError: Фоновая запись CSV завершилась ошибкой.
             OSError: Не удалось сбросить буфер или закрыть файл.
         """
-        await self._decoder.wait_for_packages()
+        await self._bus.drain_packages.emit()
         await self._data_writer.close()
 
     async def _on_storage_error(self, err: Exception, file_path: Optional[Path]) -> None:

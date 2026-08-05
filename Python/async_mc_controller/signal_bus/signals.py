@@ -24,6 +24,10 @@ class Signals(Enum):
     # Decoder → Controller
     PACKAGE_READY = 'PackageReady'
 
+    # Controller → Decoder
+    DRAIN_PACKAGES            = 'DrainPackages'
+    ENABLE_PACKAGE_PUBLISHING = 'EnablePackagePublishing'
+
     # Controller → ComPort
     STOP_EXECUTING      = 'StopExecuting'
     START_MEASURING     = 'StartMeasuring'

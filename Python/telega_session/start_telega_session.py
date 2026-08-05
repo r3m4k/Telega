@@ -74,7 +74,6 @@ async def _run_telega_session(logger_config: LoggerConfig,
         controller = ControllerTelega(
             bus,
             mc_logger,
-            decoder,
             command_queue,
             response_queue,
             data_queue,
