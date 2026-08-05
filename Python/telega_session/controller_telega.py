@@ -1,3 +1,5 @@
+"""Контроллер сессии МК и межпроцессорного обмена с GUI."""
+
 # System imports
 import asyncio
 import logging
@@ -5,7 +7,7 @@ from enum import IntEnum
 from multiprocessing import Queue
 from pathlib import Path
 from queue import Empty
-from typing import Any, Callable, Awaitable, Optional
+from typing import Any, Awaitable, Callable, Optional
 
 # External imports
 from pydantic import ValidationError
@@ -24,12 +26,13 @@ from telega_session.session_event_name import SessionEventName
 
 #########################
 
-_RESPONSE_TIMEOUT: float = 2.0    # Таймаут выставления событий
 _GUI_PACKAGE_PERIOD: float = 0.5  # Период отправки последнего пакета в GUI
 
 # ----------------------------------------------------------------
 
 class TelegaStatusCode(IntEnum):
+    """Коды результатов команд и завершения сессии тележки."""
+
     SUCCESS = 0
     UNKNOWN_ERROR = 1
     READ_ERROR = 2
@@ -37,13 +40,29 @@ class TelegaStatusCode(IntEnum):
     DEVICE_LOST = 4
     COMMAND_ACK_TIMEOUT = 5
     COMMAND_REJECTED = 6
+    STORAGE_ERROR = 7
+    CONNECTION_FAILED = 8
 
 # ----------------------------------------------------------------
 
 class UnknownTelegaStatusCode(KeyError):
-    def __init__(self, status_code: TelegaStatusCode, message: str = None):
-        self.status_code = status_code
-        self.message = message or f"Неизвестный код статуса: {status_code.name} // {status_code.value}"
+    """Ошибка обращения к неизвестному коду состояния тележки."""
+
+    def __init__(
+            self,
+            status_code: TelegaStatusCode,
+            message: Optional[str] = None,
+    ) -> None:
+        """Инициализирует ошибку неизвестного кода.
+
+        Args:
+            status_code: Неизвестный код состояния.
+            message: Пользовательское описание ошибки.
+        """
+        self.status_code: TelegaStatusCode = status_code
+        self.message: str = message or (
+            f'Неизвестный код статуса: {status_code.name} // {status_code.value}'
+        )
         super().__init__(self.message)
 
     def __str__(self) -> str:
@@ -52,8 +71,11 @@ class UnknownTelegaStatusCode(KeyError):
 # ----------------------------------------------------------------
 
 class TelegaStatusCodeMessages:
-    def __init__(self):
-        self.__messages: dict[TelegaStatusCode, str] = {
+    """Неизменяемое соответствие кодов состояния пользовательским сообщениям."""
+
+    def __init__(self) -> None:
+        """Создаёт таблицу сообщений для всех кодов состояния."""
+        self._messages: dict[TelegaStatusCode, str] = {
             TelegaStatusCode.SUCCESS:             "Корректное завершение работы",
             TelegaStatusCode.UNKNOWN_ERROR:       "Неизвестная ошибка",
             TelegaStatusCode.READ_ERROR:          "Ошибка чтения данных",
@@ -61,33 +83,44 @@ class TelegaStatusCodeMessages:
             TelegaStatusCode.DEVICE_LOST:         "Потеря связи с устройством",
             TelegaStatusCode.COMMAND_ACK_TIMEOUT: "Таймаут ожидания подтверждения команды",
             TelegaStatusCode.COMMAND_REJECTED:    "Команда не распознана устройством",
+            TelegaStatusCode.STORAGE_ERROR:       "Ошибка CSV-хранилища",
+            TelegaStatusCode.CONNECTION_FAILED:   "Ошибка подключения к устройству",
         }
 
     def __getitem__(self, status_code: TelegaStatusCode) -> str:
-        if status_code in self.__messages.keys():
-            return self.__messages[status_code]
-        else:
+        """Возвращает сообщение для указанного кода состояния."""
+        if status_code not in self._messages:
             raise UnknownTelegaStatusCode(status_code)
+        return self._messages[status_code]
 
-    def __setitem__(self, key, value):
-        raise TypeError("TelegaStatusCodeMessage is read-only")
+    def __setitem__(self, key: TelegaStatusCode, value: str) -> None:
+        """Запрещает изменение таблицы сообщений."""
+        raise TypeError('TelegaStatusCodeMessages is read-only')
 
 # ----------------------------------------------------------------
 
 class ControllerTelega(Controller):
-    """
-    Список сообщений, которые могут быть отправлены в responce_queue:
-    * HANDSHAKE_DONE - процедура рукопожатия выполнена успешно
-    * HANDSHAKE_FAILED - процедура рукопожатия завершена с ошибкой
-    * STOP_STATIC_INIT - получено сообщение от МК о завершении набора статического буфера
-    * UNKNOWN_ERROR - поймано непредвиденное исключение
-    * READ_ERROR - получено исключение ReadError от AsyncComPort
-    * DEVICE_LOST - устройство не ответило на HEARTBEAT
-    * COMMAND_ACK_TIMEOUT - таймаут подтверждения получения команды МК
-    * COMMAND_REJECTED - МК получил неизвестную ему команду
-    """
-    def __init__(self, bus: McBus, mc_logger: McLogger, decoder: DecoderTelega,
-                 command_queue: Queue, response_queue: Queue, data_queue: Queue):
+    """Связывает команды GUI, внутреннюю шину МК и события сессии."""
+
+    def __init__(
+            self,
+            bus: McBus,
+            mc_logger: McLogger,
+            decoder: DecoderTelega,
+            command_queue: Queue,
+            response_queue: Queue,
+            data_queue: Queue,
+    ) -> None:
+        """Инициализирует контроллер тележки.
+
+        Args:
+            bus: Сигнальная шина сессии МК.
+            mc_logger: Фабрика логгеров сессии.
+            decoder: Декодер протокола тележки.
+            command_queue: Очередь команд родительского процесса.
+            response_queue: Очередь событий для родительского процесса.
+            data_queue: Очередь последних пакетов телеметрии.
+        """
 
         # Вызов родительского конструктора
         super().__init__(bus, mc_logger)
@@ -100,7 +133,7 @@ class ControllerTelega(Controller):
 
         # Код завершения работы с МК и предопределённые текстовые сообщения
         self._telega_status_code: TelegaStatusCode = TelegaStatusCode.SUCCESS
-        self._telega_status_code_messages = TelegaStatusCodeMessages()
+        self._telega_status_code_messages: TelegaStatusCodeMessages = TelegaStatusCodeMessages()
 
         # Сохраним переданные очереди для межпроцессорного взаимодействия
         self._command_queue = command_queue
@@ -118,6 +151,9 @@ class ControllerTelega(Controller):
 
         # Таска по чтению очереди команд от родительского процесса
         self._reading_cmd_queue_task: Optional[asyncio.Task] = None
+
+        # Результат единственной выполняемой команды МК.
+        self._pending_command_result: Optional[asyncio.Future[TelegaStatusCode]] = None
 
         # Словарь для соответствия полученного сообщения и метода отработки.
         self._command_to_handler: dict[CommandName, Callable[[dict[str, Any]], Awaitable[None]]] = {
@@ -141,6 +177,7 @@ class ControllerTelega(Controller):
 
         # Самостоятельная подписка на специфичные события шины
         self._bus.handshake_done.subscribe(self)
+        self._bus.command_ack.subscribe(self)
         self._bus.stop_static_init.subscribe(self)
         self._bus.interrupt_measuring.subscribe(self)
 
@@ -153,6 +190,7 @@ class ControllerTelega(Controller):
         """ Процедура выхода из контекстного менеджера """
 
         self._bus.handshake_done.unsubscribe(self)
+        self._bus.command_ack.unsubscribe(self)
         self._bus.stop_static_init.unsubscribe(self)
         self._bus.interrupt_measuring.unsubscribe(self)
 
@@ -177,7 +215,10 @@ class ControllerTelega(Controller):
             self._telega_controller_logger.info("Завершение работы через INTERRUPT_MEASURING")
         await self._bus.interrupt_measuring.emit()
 
-        await self._close_storage()
+        try:
+            await self._close_storage()
+        except (DataStorageError, OSError) as err:
+            self._telega_controller_logger.error(f'Ошибка закрытия CSV-хранилища: {err}')
         try:
             await self._data_writer.stop()
         except (DataStorageError, OSError) as err:
@@ -200,18 +241,21 @@ class ControllerTelega(Controller):
                 await controller.running()
             print(decoder)
         """
-        self._stop_event.clear()
         await self._stop_event.wait()
 
-        # Процедура завершения работы перед выходом из контекстного менеджера
-        # await self._send_info_msg(
-        #     f'Код завершения работы с устройством: {self._telega_status_code} '
-        #     f'// {self._telega_status_code_messages[self._telega_status_code]}'
-        # )
+    # =============================================================
+    # ============= Обработчики полученных команд =================
+    # =============================================================
 
-    # =============================================================
-    # =================== Внутренняя логика =======================
-    # =============================================================
+    # -------------------------------------------------------------
+    # Добавление новой IPC-команды:
+    # 1. Добавить CommandName, парный *_RESULT и соответствия в
+    #    _command_to_handler и ComPortReader._command_result_events.
+    # 2. Если команда ждёт ответ МК, использовать Future-пайплайн из
+    #    _handshake_init(); иначе сформировать результат непосредственно.
+    # 3. Кроме STOP_RUNNING, обработчик отправляет ровно один терминальный
+    #    *_RESULT с обязательными success и error_info.
+    # -------------------------------------------------------------
 
     async def _stop_running(self, params: dict[str, Any]) -> None:
         """ Завершение работы контроллера """
@@ -219,9 +263,45 @@ class ControllerTelega(Controller):
         self._stop_event.set()
 
     async def _handshake_init(self, params: dict[str, Any]) -> None:
-        """ Инициирование процедуры рукопожатия """
-        self._telega_controller_logger.debug('Инициирование процедуры рукопожатия')
-        await self._bus.handshake_init.emit()
+        """Инициирует handshake и отправляет его терминальный результат."""
+        # Регистрируем Future до McBus.emit(): ответ МК может прийти сразу после
+        # записи запроса в COM-порт, и обработчик должен уже видеть Future команды.
+        if self._pending_command_result is not None:
+            raise RuntimeError('Предыдущая команда МК ещё не завершена')
+        command_result = asyncio.get_running_loop().create_future()
+        self._pending_command_result = command_result
+
+        try:
+            # McBus.emit() завершится после получения ответа либо таймаута внутри
+            # AsyncComPortDevice.on_handshake_init(). Результат в Future запишет
+            # on_handshake_done() или on_handshake_failed().
+            self._telega_controller_logger.debug('Инициирование процедуры рукопожатия')
+            await self._bus.handshake_init.emit()
+
+            # Возврат из emit() без результата означает нарушение внутреннего
+            # протокола обработки команды.
+            if not command_result.done():
+                command_result.set_result(TelegaStatusCode.UNKNOWN_ERROR)
+
+            # Преобразуем внутренний код результата в терминальный SessionEvent.
+            status_code = await command_result
+            success = status_code == TelegaStatusCode.SUCCESS
+            error_info = '' if success else self._telega_status_code_messages[status_code]
+            await self._send_session_event(
+                SessionEvent(
+                    event=SessionEventName.HANDSHAKE_INIT_RESULT,
+                    params={'success': success, 'error_info': error_info},
+                )
+            )
+
+            # Неуспешный handshake не позволяет продолжать текущую сессию.
+            if not success:
+                self._telega_status_code = status_code
+                self._stop_event.set()
+        finally:
+            # Очищаем только Future, созданный текущим обработчиком команды.
+            if self._pending_command_result is command_result:
+                self._pending_command_result = None
 
     async def _set_saving_file(self, params: dict[str, Any]) -> None:
         """Подготавливает новый CSV-файл по команде GUI.
@@ -259,27 +339,319 @@ class ControllerTelega(Controller):
         await self._send_saving_file_result(True, str(file_path))
 
     async def _start_static_init(self, params: dict[str, Any]) -> None:
-        """ Запуск набора статического буфера """
-        if not await self._ensure_storage_ready():
+        """Запускает статический набор и отправляет результат команды."""
+        if not self._ensure_storage_ready():
+            await self._send_session_event(
+                SessionEvent(
+                    event=SessionEventName.START_STATIC_INIT_RESULT,
+                    params={
+                        'success': False,
+                        'error_info': (
+                            'Перед запуском статического набора необходимо '
+                            'выполнить SET_SAVING_FILE'
+                        ),
+                    },
+                )
+            )
             return
-        self._telega_controller_logger.debug('Запуск набора статического буфера')
-        await self._bus.start_static_init.emit()
+
+        # Future-пайплайн описан в _handshake_init(). Для обычной команды
+        # результат устанавливают обработчики ACK, отказа или таймаута.
+        if self._pending_command_result is not None:
+            raise RuntimeError('Предыдущая команда МК ещё не завершена')
+        command_result = asyncio.get_running_loop().create_future()
+        self._pending_command_result = command_result
+
+        try:
+            self._telega_controller_logger.debug('Запуск набора статического буфера')
+            await self._bus.start_static_init.emit()
+
+            if not command_result.done():
+                command_result.set_result(TelegaStatusCode.UNKNOWN_ERROR)
+
+            status_code = await command_result
+            success = status_code == TelegaStatusCode.SUCCESS
+            error_info = '' if success else self._telega_status_code_messages[status_code]
+            await self._send_session_event(
+                SessionEvent(
+                    event=SessionEventName.START_STATIC_INIT_RESULT,
+                    params={'success': success, 'error_info': error_info},
+                )
+            )
+
+            if not success:
+                self._telega_status_code = status_code
+                self._stop_event.set()
+        finally:
+            if self._pending_command_result is command_result:
+                self._pending_command_result = None
 
     async def _start_measuring(self, params: dict[str, Any]) -> None:
-        """ Запуск измерений """
-        if not await self._ensure_storage_ready():
+        """Запускает измерения и отправляет результат команды."""
+        if not self._ensure_storage_ready():
+            await self._send_session_event(
+                SessionEvent(
+                    event=SessionEventName.START_MEASURING_RESULT,
+                    params={
+                        'success': False,
+                        'error_info': (
+                            'Перед запуском измерений необходимо выполнить '
+                            'SET_SAVING_FILE'
+                        ),
+                    },
+                )
+            )
             return
-        self._telega_controller_logger.debug('Запуск измерений')
-        await self._bus.start_measuring.emit()
+
+        # Future-пайплайн описан в _handshake_init(). Здесь результат
+        # устанавливают обработчики ACK, отказа или таймаута обычной команды.
+        if self._pending_command_result is not None:
+            raise RuntimeError('Предыдущая команда МК ещё не завершена')
+        command_result = asyncio.get_running_loop().create_future()
+        self._pending_command_result = command_result
+
+        try:
+            self._telega_controller_logger.debug('Запуск измерений')
+            await self._bus.start_measuring.emit()
+
+            if not command_result.done():
+                command_result.set_result(TelegaStatusCode.UNKNOWN_ERROR)
+
+            status_code = await command_result
+            success = (status_code == TelegaStatusCode.SUCCESS)
+            error_info = '' if success else self._telega_status_code_messages[status_code]
+            await self._send_session_event(
+                SessionEvent(
+                    event=SessionEventName.START_MEASURING_RESULT,
+                    params={'success': success, 'error_info': error_info},
+                )
+            )
+
+            # Отказ МК, таймаут или нарушение протокола считаются фатальными.
+            if not success:
+                self._telega_status_code = status_code
+                self._stop_event.set()
+
+        finally:
+            if self._pending_command_result is command_result:
+                self._pending_command_result = None
 
     async def _stop_measuring(self, params: dict[str, Any]) -> None:
-        """ Остановка измерений """
-        self._telega_controller_logger.debug('Остановка измерений')
-        await self._bus.stop_measuring.emit()
-        if await self._close_storage():
-            await self._send_session_event(SessionEvent(event=SessionEventName.MEASURING_STOPPED))
+        """Останавливает измерения, закрывает CSV и отправляет результат."""
+        # Future-пайплайн описан в _handshake_init(). Здесь результат
+        # устанавливают обработчики ACK, отказа или таймаута обычной команды.
+        if self._pending_command_result is not None:
+            raise RuntimeError('Предыдущая команда МК ещё не завершена')
+        command_result = asyncio.get_running_loop().create_future()
+        self._pending_command_result = command_result
 
-    async def _reading_command_queue(self):
+        try:
+            self._telega_controller_logger.debug('Остановка измерений')
+            await self._bus.stop_measuring.emit()
+
+            if not command_result.done():
+                command_result.set_result(TelegaStatusCode.UNKNOWN_ERROR)
+
+            status_code = await command_result
+            if status_code != TelegaStatusCode.SUCCESS:
+                await self._send_session_event(
+                    SessionEvent(
+                        event=SessionEventName.STOP_MEASURING_RESULT,
+                        params={
+                            'success': False,
+                            'error_info': self._telega_status_code_messages[status_code],
+                        },
+                    )
+                )
+                self._telega_status_code = status_code
+                self._stop_event.set()
+                return
+
+            # После успешного ACK дожидаемся пакетов и закрываем CSV, поэтому
+            # STOP_MEASURING_RESULT подтверждает завершение всей операции.
+            try:
+                await self._close_storage()
+            except (DataStorageError, OSError) as err:
+                # Фоновая ошибка записи уже отправила SESSION_ERROR и тем самым
+                # завершила ожидающую GUI-команду без дополнительного *_RESULT.
+                if self._telega_status_code == TelegaStatusCode.STORAGE_ERROR:
+                    return
+
+                error_info = f'{self._telega_status_code_messages[TelegaStatusCode.STORAGE_ERROR]}: {err}'
+                await self._send_session_event(
+                    SessionEvent(
+                        event=SessionEventName.STOP_MEASURING_RESULT,
+                        params={'success': False, 'error_info': error_info},
+                    )
+                )
+                self._telega_status_code = TelegaStatusCode.STORAGE_ERROR
+                self._stop_event.set()
+                return
+
+            await self._send_session_event(
+                SessionEvent(
+                    event=SessionEventName.STOP_MEASURING_RESULT,
+                    params={'success': True, 'error_info': ''},
+                )
+            )
+        finally:
+            if self._pending_command_result is command_result:
+                self._pending_command_result = None
+
+    # =============================================================
+    # =================== Обработчики сигналов ====================
+    # =============================================================
+
+    async def on_package_ready(self, data_package: TelegaData) -> None:
+        """Обработчик сигнала PACKAGE_READY.
+
+        Передаёт пакет фоновому CSV-писателю и обновляет значение для GUI.
+
+        Args:
+            data_package: Декодированный пакет данных
+        """
+        self._latest_package = data_package
+        self._latest_package_version += 1
+        try:
+            await self._data_writer.write_package(data_package)
+        except DataStorageError as err:
+            await self._on_storage_error(err, self._data_writer.file_path)
+
+    async def on_handshake_done(self) -> None:
+        """Завершает Future handshake успешным результатом."""
+        command_result = self._pending_command_result
+        if command_result is not None and not command_result.done():
+            command_result.set_result(TelegaStatusCode.SUCCESS)
+
+    async def on_command_ack(self) -> None:
+        """Завершает Future текущей обычной команды успешным результатом."""
+        command_result = self._pending_command_result
+        if command_result is not None and not command_result.done():
+            command_result.set_result(TelegaStatusCode.SUCCESS)
+
+    async def on_stop_static_init(self) -> None:
+        """Закрывает CSV и сообщает о фактическом завершении static init."""
+        try:
+            await self._close_storage()
+        except (DataStorageError, OSError) as err:
+            await self._on_storage_error(err, self._data_writer.file_path)
+            return
+
+        await self._send_session_event(
+            SessionEvent(event=SessionEventName.STATIC_INIT_COMPLETED)
+        )
+
+    async def on_interrupt_measuring(self) -> None:
+        """ Обработчик сигнала INTERRUPT_MEASURING.
+
+        Отмена _measuring_pipeline_task.
+        """
+        if self._telega_status_code == TelegaStatusCode.SUCCESS:
+            self._telega_status_code = TelegaStatusCode.UNKNOWN_ERROR
+            await self._send_session_event(
+                SessionEvent(
+                    event=SessionEventName.SESSION_ERROR,
+                    params={
+                        'error_code': TelegaStatusCode.UNKNOWN_ERROR.name,
+                        'error_info': self._telega_status_code_messages[
+                            TelegaStatusCode.UNKNOWN_ERROR
+                        ],
+                    },
+                )
+            )
+        self._stop_event.set()
+
+    async def on_read_error(self, err: ReadError) -> None:
+        """Обработчик сигнала READ_ERROR.
+
+        Отменим self._measuring_pipeline_task, установим TelegaStatusCode.READ_ERROR
+        и вызовем родительский обработчик сигнала.
+
+        Args:
+            err (ReadError): Исключение, которое привело к остановке чтения.
+        """
+        self._telega_controller_logger.error(f'Получено исключение: {err}')
+        self._telega_status_code = TelegaStatusCode.READ_ERROR
+        await self._send_session_event(
+            SessionEvent(
+                event=SessionEventName.SESSION_ERROR,
+                params={
+                    'error_code': TelegaStatusCode.READ_ERROR.name,
+                    'error_info': (
+                        f'{self._telega_status_code_messages[TelegaStatusCode.READ_ERROR]}: {err}'
+                    ),
+                },
+            )
+        )
+        self._stop_event.set()
+
+    async def on_handshake_failed(self) -> None:
+        """Обработчик сигнала HANDSHAKE_FAILED.
+
+        Завершает Future handshake отрицательным результатом. Остановку сессии
+        выполняет командный обработчик после отправки HANDSHAKE_INIT_RESULT.
+        """
+        command_result = self._pending_command_result
+        if command_result is not None and not command_result.done():
+            command_result.set_result(TelegaStatusCode.HANDSHAKE_FAILED)
+            return
+
+        self._telega_status_code = TelegaStatusCode.HANDSHAKE_FAILED
+        self._stop_event.set()
+
+    async def on_device_lost(self) -> None:
+        """Обработчик сигнала DEVICE_LOST.
+
+        Установим TelegaStatusCode.DEVICE_LOST
+        и вызовем родительский обработчик сигнала.
+        """
+        self._telega_status_code = TelegaStatusCode.DEVICE_LOST
+        await self._send_session_event(
+            SessionEvent(
+                event=SessionEventName.SESSION_ERROR,
+                params={
+                    'error_code': TelegaStatusCode.DEVICE_LOST.name,
+                    'error_info': self._telega_status_code_messages[
+                        TelegaStatusCode.DEVICE_LOST
+                    ],
+                },
+            )
+        )
+        self._stop_event.set()
+
+    async def on_command_ack_timeout(self) -> None:
+        """Обработчик сигнала COMMAND_ACK_TIMEOUT.
+
+        Завершает Future текущей команды отрицательным результатом. Остановку
+        сессии выполняет командный обработчик после отправки `*_RESULT`.
+        """
+        command_result = self._pending_command_result
+        if command_result is not None and not command_result.done():
+            command_result.set_result(TelegaStatusCode.COMMAND_ACK_TIMEOUT)
+            return
+
+        self._telega_status_code = TelegaStatusCode.COMMAND_ACK_TIMEOUT
+        self._stop_event.set()
+
+    async def on_command_rejected(self) -> None:
+        """Обработчик сигнала COMMAND_REJECTED.
+
+        Завершает Future текущей команды отрицательным результатом. Остановку
+        сессии выполняет командный обработчик после отправки `*_RESULT`.
+        """
+        command_result = self._pending_command_result
+        if command_result is not None and not command_result.done():
+            command_result.set_result(TelegaStatusCode.COMMAND_REJECTED)
+            return
+
+        self._telega_status_code = TelegaStatusCode.COMMAND_REJECTED
+        self._stop_event.set()
+
+    # =============================================================
+    # =========== Метод для работы с очередью команд ==============
+    # =============================================================
+
+    async def _reading_command_queue(self) -> None:
         """Неблокирующее чтение данных из self._command_queue"""
 
         self._telega_controller_logger.debug('Запуск _reading_command_queue')
@@ -326,10 +698,35 @@ class ControllerTelega(Controller):
                     f'Получена команда {command_request.command} с параметрами {command_request.params}'
                 )
                 coro_handler = self._command_to_handler[command_request.command]
-                await coro_handler(command_request.params)
+                try:
+                    await coro_handler(command_request.params)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as err:
+                    self._telega_controller_logger.exception(
+                        f'Непредвиденная ошибка выполнения команды '
+                        f'{command_request.command}: {err}'
+                    )
+                    self._telega_status_code = TelegaStatusCode.UNKNOWN_ERROR
+                    await self._send_session_event(
+                        SessionEvent(
+                            event=SessionEventName.SESSION_ERROR,
+                            params={
+                                'error_code': TelegaStatusCode.UNKNOWN_ERROR.name,
+                                'error_info': str(err),
+                            },
+                        )
+                    )
+                    self._stop_event.set()
+                    return
 
         except asyncio.CancelledError:
             self._telega_controller_logger.debug('Таска _reading_command_queue отменена')
+            raise
+
+    # =============================================================
+    # ====== Отправка ответов/данных в управляющий процесс ========
+    # =============================================================
 
     async def _send_package(self, data_package: TelegaData) -> None:
         """Отправляет последний пакет в data_queue для GUI."""
@@ -348,7 +745,7 @@ class ControllerTelega(Controller):
     async def _send_saving_file_result(self,
                                        success: bool,
                                        filepath: str,
-                                       error_info: Optional[str] = None) -> None:
+                                       error_info: str = '') -> None:
         """Отправляет результат команды SET_SAVING_FILE в GUI.
 
         Args:
@@ -356,11 +753,15 @@ class ControllerTelega(Controller):
             filepath: Абсолютный путь к запрошенному файлу.
             error_info: Описание ошибки при неуспешном результате.
         """
-        params: dict[str, Any] = {'success': success, 'filepath': filepath}
-        if error_info is not None:
-            params['error_info'] = error_info
         await self._send_session_event(
-            SessionEvent(event=SessionEventName.SET_SAVING_FILE_RESULT, params=params)
+            SessionEvent(
+                event=SessionEventName.SET_SAVING_FILE_RESULT,
+                params={
+                    'success': success,
+                    'error_info': error_info,
+                    'filepath': filepath,
+                },
+            )
         )
 
     async def _package_publishing_loop(self) -> None:
@@ -379,30 +780,23 @@ class ControllerTelega(Controller):
         except asyncio.CancelledError:
             self._telega_controller_logger.debug('Таска отправки пакетов в GUI отменена')
 
-    async def _ensure_storage_ready(self) -> bool:
+    # =============================================================
+    # ======== Методы для работы с хранилищем телеметрии ==========
+    # =============================================================
+
+    def _ensure_storage_ready(self) -> bool:
         """Проверяет готовность хранилища перед запуском этапа измерений."""
-        if self._data_writer.is_open:
-            return True
+        return self._data_writer.is_open
 
-        await self._on_storage_error(
-            DataStorageError('Перед запуском измерений необходимо выполнить SET_SAVING_FILE'),
-            None,
-        )
-        return False
-
-    async def _close_storage(self) -> bool:
+    async def _close_storage(self) -> None:
         """Дожидается декодированных пакетов и закрывает CSV-файл.
 
-        Returns:
-            ``True``, если хранилище закрыто без ошибок.
+        Raises:
+            DataStorageError: Фоновая запись CSV завершилась ошибкой.
+            OSError: Не удалось сбросить буфер или закрыть файл.
         """
-        try:
-            await self._decoder.wait_for_packages()
-            await self._data_writer.close()
-            return True
-        except (DataStorageError, OSError) as err:
-            await self._on_storage_error(err, self._data_writer.file_path)
-            return False
+        await self._decoder.wait_for_packages()
+        await self._data_writer.close()
 
     async def _on_storage_error(self, err: Exception, file_path: Optional[Path]) -> None:
         """Сообщает об ошибке CSV и завершает текущую сессию.
@@ -412,114 +806,20 @@ class ControllerTelega(Controller):
             file_path: Путь проблемного файла, если он известен.
         """
         self._telega_controller_logger.error(f'Ошибка CSV-хранилища: {err}')
-        self._telega_status_code = TelegaStatusCode.UNKNOWN_ERROR
+        if self._telega_status_code == TelegaStatusCode.STORAGE_ERROR:
+            self._stop_event.set()
+            return
+
+        self._telega_status_code = TelegaStatusCode.STORAGE_ERROR
+        error_info = f'{self._telega_status_code_messages[TelegaStatusCode.STORAGE_ERROR]}: {err}'
         await self._send_session_event(
             SessionEvent(
-                event=SessionEventName.STORAGE_ERROR,
+                event=SessionEventName.SESSION_ERROR,
                 params={
+                    'error_code': TelegaStatusCode.STORAGE_ERROR.name,
+                    'error_info': error_info,
                     'filepath': str(file_path) if file_path is not None else '',
-                    'error_info': str(err),
                 },
             )
         )
-        self._stop_event.set()
-
-    # =============================================================
-    # =================== Обработчики сигналов ====================
-    # =============================================================
-
-    async def on_package_ready(self, data_package: TelegaData) -> None:
-        """Обработчик сигнала PACKAGE_READY.
-
-        Передаёт пакет фоновому CSV-писателю и обновляет значение для GUI.
-
-        Args:
-            data_package: Декодированный пакет данных
-        """
-        self._latest_package = data_package
-        self._latest_package_version += 1
-        try:
-            await self._data_writer.write_package(data_package)
-        except DataStorageError as err:
-            await self._on_storage_error(err, self._data_writer.file_path)
-
-    async def on_handshake_done(self) -> None:
-        """Обработчик сигнала HANDSHAKE_DONE от декодера.
-
-        Отправка HANDSHAKE_DONE родительскому процессу
-        через response_queue.
-        """
-        await self._send_session_event(SessionEvent(event=SessionEventName.HANDSHAKE_DONE))
-
-    async def on_stop_static_init(self) -> None:
-        """ Обработчик сигнала STOP_STATIC_INIT от декодера.
-
-        Отправка STOP_STATIC_INIT родительскому процессу
-        через response_queue.
-        """
-        if await self._close_storage():
-            await self._send_session_event(SessionEvent(event=SessionEventName.STOP_STATIC_INIT))
-
-    async def on_interrupt_measuring(self) -> None:
-        """ Обработчик сигнала INTERRUPT_MEASURING.
-
-        Отмена _measuring_pipeline_task.
-        """
-        if self._telega_status_code == TelegaStatusCode.SUCCESS:
-            self._telega_status_code = TelegaStatusCode.UNKNOWN_ERROR
-            await self._send_session_event(SessionEvent(event=SessionEventName.UNKNOWN_ERROR))
-        self._stop_event.set()
-
-    async def on_read_error(self, err: ReadError) -> None:
-        """Обработчик сигнала READ_ERROR.
-
-        Отменим self._measuring_pipeline_task, установим TelegaStatusCode.READ_ERROR
-        и вызовем родительский обработчик сигнала.
-
-        Args:
-            err (ReadError): Исключение, которое привело к остановке чтения.
-        """
-        self._telega_controller_logger.error(f'Получено исключение: {err}')
-        self._telega_status_code = TelegaStatusCode.READ_ERROR
-        self._stop_event.set()
-        await self._send_session_event(SessionEvent(event=SessionEventName.READ_ERROR))
-
-    async def on_handshake_failed(self) -> None:
-        """Обработчик сигнала HANDSHAKE_FAILED.
-
-        Установим TelegaStatusCode.HANDSHAKE_FAILED
-        и вызовем родительский обработчик сигнала.
-        """
-        self._telega_status_code = TelegaStatusCode.HANDSHAKE_FAILED
-        await self._send_session_event(SessionEvent(event=SessionEventName.HANDSHAKE_FAILED))
-        self._stop_event.set()
-
-    async def on_device_lost(self) -> None:
-        """Обработчик сигнала DEVICE_LOST.
-
-        Установим TelegaStatusCode.DEVICE_LOST
-        и вызовем родительский обработчик сигнала.
-        """
-        self._telega_status_code = TelegaStatusCode.DEVICE_LOST
-        await self._send_session_event(SessionEvent(event=SessionEventName.DEVICE_LOST))
-        self._stop_event.set()
-
-    async def on_command_ack_timeout(self) -> None:
-        """Обработчик сигнала COMMAND_ACK_TIMEOUT.
-
-        Установим TelegaStatusCode.COMMAND_ACK_TIMEOUT
-        и вызовем родительский обработчик сигнала.
-        """
-        self._telega_status_code = TelegaStatusCode.COMMAND_ACK_TIMEOUT
-        await self._send_session_event(SessionEvent(event=SessionEventName.COMMAND_ACK_TIMEOUT))
-        self._stop_event.set()
-
-    async def on_command_rejected(self) -> None:
-        """Обработчик сигнала COMMAND_REJECTED.
-
-        Установим TelegaStatusCode.COMMAND_REJECTED
-        и вызовем родительский обработчик сигнала.
-        """
-        self._telega_status_code = TelegaStatusCode.COMMAND_REJECTED
-        await self._send_session_event(SessionEvent(event=SessionEventName.COMMAND_REJECTED))
         self._stop_event.set()

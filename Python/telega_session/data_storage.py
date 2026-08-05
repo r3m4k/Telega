@@ -157,7 +157,7 @@ class AsyncDataStorageWriter:
             error_handler: Асинхронный обработчик ошибки фоновой записи.
         """
         self._storage: DataStorage = DataStorage()
-        self._queue: asyncio.Queue[TelegaData] = asyncio.Queue(maxsize=_STORAGE_QUEUE_SIZE)
+        self._package_queue: asyncio.Queue[TelegaData] = asyncio.Queue(maxsize=_STORAGE_QUEUE_SIZE)
         self._lock: asyncio.Lock = asyncio.Lock()
         self._error_handler: StorageErrorHandler = error_handler
         self._task: Optional[asyncio.Task] = None
@@ -188,9 +188,9 @@ class AsyncDataStorageWriter:
             DataStorageError: Если фоновая запись уже завершилась ошибкой.
             OSError: Если не удалось подготовить файл.
         """
-        self._raise_write_error()
+        self._raise_if_write_failed()
         async with self._lock:
-            await self._queue.join()
+            await self._package_queue.join()
             await asyncio.to_thread(self._storage.set_file, file_path)
 
     async def write_package(self, package: TelegaData) -> None:
@@ -206,36 +206,52 @@ class AsyncDataStorageWriter:
         if not isinstance(package, TelegaData):
             raise TypeError(f'Ожидается package: TelegaData, получен {type(package)}')
 
-        self._raise_write_error()
+        self._raise_if_write_failed()
         async with self._lock:
             if not self.is_open:
                 return
-            await self._queue.put(package)
+            await self._package_queue.put(package)
 
     async def close(self) -> None:
-        """Осушает очередь, сбрасывает буфер и закрывает CSV-файл."""
+        """Осушает очередь, закрывает CSV и пробрасывает ошибку записи.
+
+        Raises:
+            DataStorageError: Фоновая запись CSV завершилась ошибкой.
+            OSError: Не удалось сбросить буфер или закрыть файл.
+        """
         async with self._lock:
-            await self._queue.join()
+            await self._package_queue.join()
             if self.is_open:
                 await asyncio.to_thread(self._storage.close)
+            self._raise_if_write_failed()
 
     async def stop(self) -> None:
-        """Останавливает фоновую задачу записи после закрытия файла."""
-        await self.close()
-        task = self._task
-        if task is not None and not task.done():
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-        self._task = None
+        """Останавливает фоновую задачу записи после закрытия файла.
+
+        Задача отменяется даже при ошибке закрытия CSV, после чего исходная
+        ошибка повторно передаётся вызывающему коду.
+
+        Raises:
+            DataStorageError: Фоновая запись CSV завершилась ошибкой.
+            OSError: Не удалось сбросить буфер или закрыть файл.
+        """
+        try:
+            await self.close()
+        finally:
+            task = self._task
+            if task is not None and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+            self._task = None
 
     async def _writing_loop(self) -> None:
         """Извлекает пакеты из очереди и записывает их пачками."""
         try:
             while True:
-                package = await self._queue.get()
+                package = await self._package_queue.get()
                 packages: list[TelegaData] = [package]
                 deadline = asyncio.get_running_loop().time() + _BATCH_MAX_WAIT
 
@@ -244,7 +260,7 @@ class AsyncDataStorageWriter:
                     if timeout <= 0:
                         break
                     try:
-                        package = await asyncio.wait_for(self._queue.get(), timeout=timeout)
+                        package = await asyncio.wait_for(self._package_queue.get(), timeout=timeout)
                     except asyncio.TimeoutError:
                         break
                     packages.append(package)
@@ -266,18 +282,18 @@ class AsyncDataStorageWriter:
     def _complete_packages(self, packages: list[TelegaData]) -> None:
         """Отмечает пакеты как полностью обработанные очередью."""
         for _ in packages:
-            self._queue.task_done()
+            self._package_queue.task_done()
 
     async def _discard_queued_packages(self) -> None:
         """Освобождает ожидание ``join`` после неисправимой ошибки записи."""
         while True:
             try:
-                self._queue.get_nowait()
+                self._package_queue.get_nowait()
             except asyncio.QueueEmpty:
                 return
-            self._queue.task_done()
+            self._package_queue.task_done()
 
-    def _raise_write_error(self) -> None:
+    def _raise_if_write_failed(self) -> None:
         """Пробрасывает ранее полученную ошибку фоновой записи."""
         if self._write_error is not None:
             raise DataStorageError(f'Фоновая запись CSV завершилась ошибкой: {self._write_error}')
