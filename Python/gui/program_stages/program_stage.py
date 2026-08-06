@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Protocol
 
 # External imports
-from PyQt5.QtWidgets import QMessageBox, QPushButton
+from PyQt5.QtWidgets import QMessageBox
 
 # User imports
 from gui.com_port_settings import ComPortSettings
@@ -18,10 +18,8 @@ from gui.saving_params import SavingParams
 class MainWindowProtocol(Protocol):
     """Описывает интерфейс главного окна, необходимый стадиям программы."""
 
-    _session_configuration_started: bool
     _saving_params: SavingParams
     _com_port_settings: ComPortSettings
-    _apply_settings_button: QPushButton
 
     def configure_session(self,
                           saving_path: Path,

@@ -1,9 +1,11 @@
 # System imports
+import asyncio
 import sys
 from multiprocessing import freeze_support
 
 # External imports
 from PyQt5.QtWidgets import QApplication
+from qasync import QEventLoop
 
 # User imports
 from gui.main_window import MainWindow
@@ -11,11 +13,17 @@ from gui.main_window import MainWindow
 ##########################################################
 
 def main() -> int:
-    """Запуск GUI-приложения."""
+    """Запускает GUI в общем event loop Qt и asyncio."""
     app = QApplication(sys.argv)
+    event_loop = QEventLoop(app)
+    asyncio.set_event_loop(event_loop)
+
     main_window = MainWindow()
     main_window.show()
-    return app.exec_()
+
+    with event_loop:
+        event_loop.run_forever()
+    return 0
 
 # =============================================================
 
