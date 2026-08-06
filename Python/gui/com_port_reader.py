@@ -168,10 +168,6 @@ class SessionProtocolError(ComPortReaderException):
     """Нарушен межпроцессный протокол команд или событий сессии."""
 
 
-class SessionDesynchronized(ComPortReaderException):
-    """Сессия рассинхронизирована и не допускает новые команды."""
-
-
 class SessionReportedError(ComPortReaderException):
     """Дочерняя сессия сообщила о фатальной ошибке."""
 
@@ -198,7 +194,7 @@ async def _cancel_task(task: Optional[asyncio.Task[None]]) -> None:
 
 
 class _SessionProcessTransport:
-    """Владеет дочерним процессом, IPC-очередями и reader-задачами.
+    """Владеет ресурсами ровно одной дочерней сессии МК.
 
     Args:
         logger: Логгер родительского процесса.
@@ -236,42 +232,19 @@ class _SessionProcessTransport:
             return False
         return self._mc_session_process.is_alive()
 
-    @property
-    def has_resources(self) -> bool:
-        """Возвращает наличие принадлежащих транспорту ресурсов."""
-        return any((
-            self._mc_session_process is not None,
-            self._command_queue is not None,
-            self._response_queue is not None,
-            self._data_queue is not None,
-            self._response_reader_task is not None,
-            self._data_reader_task is not None,
-        ))
-
     # =============================================================
     # ======================== Публичный API ======================
     # =============================================================
 
     def start(self, session_config: ComPortSessionConfig) -> None:
-        """Создаёт очереди, запускает процесс и reader-задачи.
+        """Однократно создаёт очереди, процесс и reader-задачи.
 
         Args:
             session_config: Параметры запуска дочерней сессии.
-
-        Raises:
-            ComPortReaderException: Предыдущие ресурсы ещё не освобождены.
         """
-        if self.is_active:
-            raise ComPortReaderException('Сессия взаимодействия с МК уже запущена')
-        if self.has_resources:
-            raise ComPortReaderException(
-                'Перед запуском новой сессии необходимо освободить старые ресурсы'
-            )
-
         self._command_queue = self._mp_context.Queue()
         self._response_queue = self._mp_context.Queue()
         self._data_queue = self._mp_context.Queue()
-        self._is_stopping = False
 
         com_port_config = ComPortConfig(
             name=session_config.com_port_name,
@@ -319,23 +292,15 @@ class _SessionProcessTransport:
                 f'Не удалось отправить команду {command_request.command.name}: {err}'
             ) from err
 
-    async def shutdown(
-            self,
-            process_timeout_seconds: float,
-            reader_timeout_seconds: float) -> None:
-        """Останавливает процесс и освобождает IPC-ресурсы.
-
-        Args:
-            process_timeout_seconds: Таймаут штатного завершения процесса.
-            reader_timeout_seconds: Таймаут естественной остановки readers.
-        """
+    async def shutdown(self) -> None:
+        """Останавливает процесс и освобождает IPC-ресурсы."""
         shutdown_error: Optional[ComPortReaderException] = None
         try:
-            await self._shutdown_process(process_timeout_seconds)
+            await self._shutdown_process()
         except ComPortReaderException as err:
             shutdown_error = err
         finally:
-            await self._shutdown_reader_tasks(reader_timeout_seconds)
+            await self._shutdown_reader_tasks()
             await self._close_queues()
 
         if shutdown_error is not None:
@@ -473,11 +438,8 @@ class _SessionProcessTransport:
     # ======================== Завершение =========================
     # =============================================================
 
-    async def _shutdown_process(self, timeout_seconds: float) -> None:
+    async def _shutdown_process(self) -> None:
         """Штатно останавливает процесс либо принудительно завершает его."""
-        if not self.has_resources:
-            return
-
         self._is_stopping = True
         process = self._mc_session_process
         if process is None:
@@ -494,7 +456,10 @@ class _SessionProcessTransport:
                 )
 
         if self.is_active:
-            await asyncio.to_thread(process.join, timeout_seconds)
+            await asyncio.to_thread(
+                process.join,
+                _DEFAULT_PROCESS_TIMEOUT_SECONDS,
+            )
         if self.is_active:
             self._logger.warning('Дочерний процесс завершается через terminate()')
             process.terminate()
@@ -512,7 +477,7 @@ class _SessionProcessTransport:
         process.close()
         self._mc_session_process = None
 
-    async def _shutdown_reader_tasks(self, timeout_seconds: float) -> None:
+    async def _shutdown_reader_tasks(self) -> None:
         """Ожидает естественную остановку readers и отменяет зависшие задачи."""
         for task in (self._response_reader_task, self._data_reader_task):
             if task is None:
@@ -521,7 +486,7 @@ class _SessionProcessTransport:
                 try:
                     await asyncio.wait_for(
                         asyncio.shield(task),
-                        timeout=timeout_seconds,
+                        timeout=_DEFAULT_READER_TIMEOUT_SECONDS,
                     )
                 except asyncio.TimeoutError:
                     await _cancel_task(task)
@@ -559,12 +524,6 @@ class ComPortReader:
     Args:
         logger: Логгер родительского приложения.
         callbacks: Высокоуровневые обработчики результатов.
-        command_timeout_seconds: Таймаут результата одной команды.
-        process_timeout_seconds: Таймаут штатного завершения процесса.
-        reader_timeout_seconds: Таймаут остановки reader-задач.
-
-    Raises:
-        ValueError: Один из таймаутов не является положительным.
     """
 
     _command_result_events: dict[CommandName, SessionEventName] = {
@@ -581,46 +540,25 @@ class ComPortReader:
     def __init__(
             self,
             logger: logging.Logger,
-            callbacks: ComPortReaderCallbacks,
-            command_timeout_seconds: float = _DEFAULT_COMMAND_TIMEOUT_SECONDS,
-            process_timeout_seconds: float = _DEFAULT_PROCESS_TIMEOUT_SECONDS,
-            reader_timeout_seconds: float = _DEFAULT_READER_TIMEOUT_SECONDS) -> None:
-        for timeout_name, timeout_value in (
-                ('command_timeout_seconds', command_timeout_seconds),
-                ('process_timeout_seconds', process_timeout_seconds),
-                ('reader_timeout_seconds', reader_timeout_seconds),
-        ):
-            if timeout_value <= 0:
-                raise ValueError(f'{timeout_name} должен быть положительным')
-
+            callbacks: ComPortReaderCallbacks) -> None:
         self._logger: logging.Logger = logger
         self._callbacks: ComPortReaderCallbacks = callbacks
-        self._command_timeout_seconds: float = command_timeout_seconds
-        self._process_timeout_seconds: float = process_timeout_seconds
-        self._reader_timeout_seconds: float = reader_timeout_seconds
 
         self._is_configured: bool = False
-        self._is_synchronized: bool = True
         self._is_closed: bool = False
         self._cleanup_lock: asyncio.Lock = asyncio.Lock()
         self._operation_task: Optional[asyncio.Task[None]] = None
         self._pending_result: Optional[asyncio.Future[SessionEvent]] = None
         self._expected_result_event: Optional[SessionEventName] = None
         self._background_error: Optional[ComPortReaderException] = None
-        self._static_init_start_in_progress: bool = False
-        self._static_init_completion_pending: bool = False
 
-        self._transport: _SessionProcessTransport = _SessionProcessTransport(
-            logger=self._logger,
-            session_event_handler=self._session_event_handler,
-            data_handler=self._data_handler,
-            error_handler=self._transport_error_handler,
-        )
+        self._transport: Optional[_SessionProcessTransport] = None
 
     @property
     def is_active(self) -> bool:
         """Возвращает признак активности дочерней сессии."""
-        return self._transport.is_active
+        transport = self._transport
+        return transport is not None and transport.is_active
 
     @property
     def is_configured(self) -> bool:
@@ -655,11 +593,9 @@ class ComPortReader:
             self._report_error(validation_error)
             return
 
-        operation_started = self._start_operation(
+        self._start_operation(
             lambda: self._start_static_init(saving_file)
         )
-        if operation_started:
-            self._static_init_start_in_progress = True
 
     def start_measuring(self, saving_file: Path) -> None:
         """Подготавливает CSV и запускает измерения.
@@ -702,39 +638,37 @@ class ComPortReader:
             raise ComPortReaderException('ComPortReader окончательно закрыт')
         if self._cleanup_lock.locked():
             raise ComPortReaderException('Выполняется освобождение ресурсов сессии')
-        if self._transport.has_resources:
+        if self._transport is not None:
             raise ComPortReaderException(
                 'Перед повторным конфигурированием необходимо выполнить reset()'
             )
 
         self._is_configured = False
-        self._is_synchronized = True
         self._background_error = None
         self._logger.debug(
             'Конфигурирование ComPortReader: '
             f'port={session_config.com_port_name}, '
             f'raw_stream_file={session_config.raw_stream_file}'
         )
-        self._transport.start(session_config)
-        await self._execute_command(
-            CommandName.HANDSHAKE_INIT,
-            require_configuration=False,
+        transport = _SessionProcessTransport(
+            logger=self._logger,
+            session_event_handler=self._session_event_handler,
+            data_handler=self._data_handler,
+            error_handler=self._transport_error_handler,
         )
+        # Ссылка сохраняется до запуска, чтобы reset() освободил даже
+        # частично созданные процессом или очередями ресурсы.
+        self._transport = transport
+        transport.start(session_config)
+        await self._execute_command(CommandName.HANDSHAKE_INIT)
         self._is_configured = True
         self._callbacks.on_handshake_done()
 
     async def _start_static_init(self, saving_file: Path) -> None:
         """Выполняет SET_SAVING_FILE и START_STATIC_INIT."""
-        try:
-            await self._prepare_saving_file(saving_file)
-            await self._execute_command(CommandName.START_STATIC_INIT)
-            self._callbacks.on_static_init_started()
-        finally:
-            self._static_init_start_in_progress = False
-
-        if self._static_init_completion_pending:
-            self._static_init_completion_pending = False
-            self._callbacks.on_static_init_completed()
+        await self._prepare_saving_file(saving_file)
+        await self._execute_command(CommandName.START_STATIC_INIT)
+        self._callbacks.on_static_init_started()
 
     async def _start_measuring(self, saving_file: Path) -> None:
         """Выполняет SET_SAVING_FILE и START_MEASURING."""
@@ -758,24 +692,20 @@ class ComPortReader:
     # ======================= Владение задачей ====================
     # =============================================================
 
-    def _start_operation(
-            self,
-            operation_factory: Callable[[], Awaitable[None]]) -> bool:
+    def _start_operation(self,
+                         operation_factory: Callable[[], Awaitable[None]]) -> None:
         """Создаёт единственную командную задачу и забирает её результат."""
         if self._operation_task is not None and not self._operation_task.done():
             self._report_error(CommandAlreadyPending())
-            return False
+            return
 
         self._operation_task = asyncio.create_task(
             self._run_operation(operation_factory),
             name='com_port_reader_operation',
         )
         self._operation_task.add_done_callback(self._operation_done)
-        return True
 
-    async def _run_operation(
-            self,
-            operation_factory: Callable[[], Awaitable[None]]) -> None:
+    async def _run_operation(self, operation_factory: Callable[[], Awaitable[None]]) -> None:
         """Направляет любое исключение операции в единый обработчик."""
         try:
             await operation_factory()
@@ -809,16 +739,20 @@ class ComPortReader:
     async def _execute_command(
             self,
             command: CommandName,
-            params: Optional[dict[str, object]] = None,
-            require_configuration: bool = True) -> None:
-        """Отправляет команду и проверяет её терминальный результат."""
+            params: Optional[dict[str, object]] = None) -> None:
+        """Отправка команды и проверка её терминального результата."""
         self._raise_background_error()
-        if require_configuration:
-            self._ensure_session_running()
-        else:
+        if command is CommandName.HANDSHAKE_INIT:
             self._ensure_transport_running()
+        else:
+            self._ensure_session_running()
+
         if self._pending_result is not None:
             raise CommandAlreadyPending()
+
+        transport = self._transport
+        if transport is None:
+            raise SessionNotRunning('Транспорт дочерней сессии не создан')
 
         expected_event = self._command_result_events.get(command)
         if expected_event is None:
@@ -833,12 +767,12 @@ class ComPortReader:
         self._expected_result_event = expected_event
 
         try:
-            await self._transport.send_command_request(
+            await transport.send_command_request(
                 CommandRequest(command=command, params=params or {})
             )
             session_event = await asyncio.wait_for(
                 future,
-                timeout=self._command_timeout_seconds,
+                timeout=_DEFAULT_COMMAND_TIMEOUT_SECONDS,
             )
         except asyncio.TimeoutError as err:
             raise CommandResultTimeout(
@@ -850,13 +784,6 @@ class ComPortReader:
                 self._expected_result_event = None
 
         if session_event.params['success']:
-            if command is CommandName.SET_SAVING_FILE:
-                expected_path = (params or {}).get('filepath')
-                received_path = session_event.params['filepath']
-                if received_path != expected_path:
-                    raise SessionProtocolError(
-                        'Дочерняя сессия подтвердила другой CSV-файл'
-                    )
             return
 
         error_info = session_event.params['error_info']
@@ -874,11 +801,7 @@ class ComPortReader:
         self._ensure_transport_running()
 
     def _ensure_transport_running(self) -> None:
-        """Проверяет синхронизацию и активность транспорта."""
-        if not self._is_synchronized:
-            raise SessionDesynchronized(
-                'Сессия рассинхронизирована и должна быть перезапущена'
-            )
+        """Проверяет активность транспорта."""
         if not self.is_active:
             raise SessionNotRunning('Дочерняя сессия с МК не запущена')
 
@@ -903,10 +826,7 @@ class ComPortReader:
             self._command_result_handler(session_event)
             return
         if session_event.event is SessionEventName.STATIC_INIT_COMPLETED:
-            if self._static_init_start_in_progress:
-                self._static_init_completion_pending = True
-            else:
-                self._callbacks.on_static_init_completed()
+            self._callbacks.on_static_init_completed()
             return
         if session_event.event is SessionEventName.SESSION_ERROR:
             self._session_error_handler(session_event)
@@ -997,7 +917,7 @@ class ComPortReader:
         self._handle_background_failure(error)
 
     def _handle_background_failure(self, error: ComPortReaderException) -> None:
-        """Фиксирует рассинхронизацию и доставляет ошибку ровно один раз."""
+        """Помечает сессию неготовой и доставляет ошибку ровно один раз."""
         if self._background_error is not None:
             return
 
@@ -1019,7 +939,6 @@ class ComPortReader:
     def _mark_session_failed(self) -> None:
         """Помечает текущую сессию непригодной для новых команд."""
         self._is_configured = False
-        self._is_synchronized = False
 
     def _report_error(self, error: ComPortReaderException) -> None:
         """Безопасно передаёт предметную ошибку GUI."""
@@ -1071,7 +990,7 @@ class ComPortReader:
     # =============================================================
 
     async def _cleanup(self, close_reader: bool) -> None:
-        """Отменяет операции и освобождает все ресурсы текущей сессии."""
+        """Освобождает и удаляет одноразовый транспорт текущей сессии."""
         async with self._cleanup_lock:
             if self._is_closed:
                 if close_reader:
@@ -1082,7 +1001,6 @@ class ComPortReader:
 
             self._logger.debug('Освобождение ресурсов ComPortReader')
             self._is_configured = False
-            self._is_synchronized = False
 
             operation_task = self._operation_task
             if operation_task is not None and operation_task is not asyncio.current_task():
@@ -1096,19 +1014,14 @@ class ComPortReader:
             self._pending_result = None
             self._expected_result_event = None
 
+            transport = self._transport
             try:
-                await self._transport.shutdown(
-                    self._process_timeout_seconds,
-                    self._reader_timeout_seconds,
-                )
+                if transport is not None:
+                    await transport.shutdown()
+                if self._transport is transport:
+                    self._transport = None
+                self._is_closed = close_reader
             finally:
                 self._background_error = None
-                self._static_init_start_in_progress = False
-                self._static_init_completion_pending = False
-                if self._transport.has_resources:
-                    self._is_synchronized = False
-                else:
-                    self._is_synchronized = True
-                    self._is_closed = close_reader
 
             self._logger.debug('Ресурсы ComPortReader освобождены')

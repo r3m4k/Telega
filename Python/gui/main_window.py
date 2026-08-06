@@ -172,7 +172,6 @@ class MainWindow(QMainWindow):
             callbacks=callbacks,
         )
 
-
     def _create_program_stages(self) -> None:
         """Создаёт устойчивые стадии пользовательского сценария."""
         self._setting_stage: SettingStage = SettingStage(self)
