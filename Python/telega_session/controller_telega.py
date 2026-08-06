@@ -252,6 +252,8 @@ class ControllerTelega(Controller):
     #    _handshake_init(); иначе сформировать результат непосредственно.
     # 3. Кроме STOP_RUNNING, обработчик отправляет ровно один терминальный
     #    *_RESULT с обязательными success и error_info.
+    # 4. Только отрицательный SET_SAVING_FILE_RESULT допускает продолжение
+    #    сессии. Остальные отрицательные результаты устанавливают _stop_event.
     # -------------------------------------------------------------
 
     async def _stop_running(self, params: dict[str, Any]) -> None:
@@ -349,6 +351,8 @@ class ControllerTelega(Controller):
                     },
                 )
             )
+            self._telega_status_code = TelegaStatusCode.STORAGE_ERROR
+            self._stop_event.set()
             return
 
         # Future-пайплайн описан в _handshake_init(). Для обычной команды
@@ -398,6 +402,8 @@ class ControllerTelega(Controller):
                     },
                 )
             )
+            self._telega_status_code = TelegaStatusCode.STORAGE_ERROR
+            self._stop_event.set()
             return
 
         # Future-пайплайн описан в _handshake_init(). Здесь результат

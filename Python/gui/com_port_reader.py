@@ -4,7 +4,9 @@
 Модуль не зависит от Qt. :class:`ComPortReader` предоставляет awaitable API,
 последовательно отправляет команды и ожидает их терминальные
 :class:`SessionEvent`. :class:`_SessionProcessTransport` владеет дочерним
-процессом и IPC-очередями, но не интерпретирует пользовательский сценарий.
+процессом, IPC-очередями и задачами их чтения, но не интерпретирует
+пользовательский сценарий. Освобождение ресурсов выполняется только явными
+вызовами :meth:`ComPortReader.reset` и :meth:`ComPortReader.shutdown`.
 """
 
 # System imports
@@ -15,7 +17,7 @@ from multiprocessing.context import BaseContext, Process
 from multiprocessing.queues import Queue
 from pathlib import Path
 from queue import Empty
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 # External imports
 from pydantic import ValidationError
@@ -65,6 +67,20 @@ class CommandResultTimeout(ComPortReaderException):
     """Истёк таймаут ожидания терминального результата команды."""
 
 
+class CommandExecutionError(ComPortReaderException):
+    """Команда завершилась отрицательным предметным результатом.
+
+    Args:
+        command: Команда, которую не удалось выполнить.
+        error_info: Описание причины отрицательного результата.
+    """
+
+    def __init__(self, command: CommandName, error_info: str) -> None:
+        self.command: CommandName = command
+        self.error_info: str = error_info
+        super().__init__(f'Команда {command} не выполнена: {error_info}')
+
+
 class SessionProtocolError(ComPortReaderException):
     """Нарушен межпроцессный протокол команд или событий сессии."""
 
@@ -78,45 +94,44 @@ class SessionReportedError(ComPortReaderException):
 
 
 # =============================================================
-# ====================== Вспомогательный IPC ===================
-# =============================================================
-
-
-def _get_queue_item(source_queue: Queue) -> tuple[bool, object]:
-    """Блокирующе получает один элемент очереди ограниченное время.
-
-    Args:
-        source_queue: Межпроцессная очередь для чтения.
-
-    Returns:
-        Пара ``(получен ли элемент, значение)``. При таймауте возвращается
-        ``(False, None)``.
-    """
-    try:
-        return True, source_queue.get(timeout=_QUEUE_READ_TIMEOUT_SECONDS)
-    except Empty:
-        return False, None
-
-
-# =============================================================
 # ================= Транспорт дочерней сессии ==================
 # =============================================================
 
 
 class _SessionProcessTransport:
-    """Управляет дочерним процессом и IPC-очередями без зависимости от Qt.
+    """Управляет дочерним процессом, IPC-очередями и их чтением.
 
     Args:
         logger: Логгер родительского процесса.
+        session_event_handler: Обработчик полученного события сессии.
+        data_handler: Обработчик полученного пакета измерений.
+        error_handler: Обработчик фоновой ошибки транспорта.
     """
 
-    def __init__(self, logger: logging.Logger):
+    def __init__(
+            self,
+            logger: logging.Logger,
+            session_event_handler: Callable[[SessionEvent], None],
+            data_handler: Callable[[PackageType], None],
+            error_handler: Callable[[ComPortReaderException], None]) -> None:
         self._logger: logging.Logger = logger
+        self._session_event_handler: Callable[[SessionEvent], None] = (
+            session_event_handler
+        )
+        self._data_handler: Callable[[PackageType], None] = data_handler
+        self._error_handler: Callable[[ComPortReaderException], None] = error_handler
+
         self._mp_context: BaseContext = get_context('spawn')
         self._mc_session_process: Optional[Process] = None
+
         self._command_queue: Optional[Queue] = None
         self._response_queue: Optional[Queue] = None
         self._data_queue: Optional[Queue] = None
+
+        self._response_reader_task: Optional[asyncio.Task[None]] = None
+        self._data_reader_task: Optional[asyncio.Task[None]] = None
+
+        self._is_stopping: bool = False
 
     @property
     def is_active(self) -> bool:
@@ -138,6 +153,8 @@ class _SessionProcessTransport:
             self._command_queue is not None,
             self._response_queue is not None,
             self._data_queue is not None,
+            self._response_reader_task is not None,
+            self._data_reader_task is not None,
         ))
 
     # =============================================================
@@ -148,7 +165,7 @@ class _SessionProcessTransport:
               logger_config: LoggerConfig,
               com_port_config: ComPortConfig,
               bin_file: Path) -> None:
-        """Создаёт IPC-очереди и запускает дочернюю сессию.
+        """Создаёт IPC-очереди, запускает процесс и reader-задачи.
 
         Args:
             logger_config: Конфигурация логирования дочернего процесса.
@@ -169,6 +186,9 @@ class _SessionProcessTransport:
         self._command_queue = self._mp_context.Queue()
         self._response_queue = self._mp_context.Queue()
         self._data_queue = self._mp_context.Queue()
+
+        self._is_stopping = False
+
         self._mc_session_process = self._mp_context.Process(
             target=start_telega_session,
             args=(
@@ -184,6 +204,7 @@ class _SessionProcessTransport:
 
         self._logger.debug('Запуск дочернего процесса сессии тележки')
         self._mc_session_process.start()
+        self._start_reader_tasks()
 
     async def send_command(self, command_request: CommandRequest) -> None:
         """Асинхронно помещает команду в `command_queue`.
@@ -210,7 +231,7 @@ class _SessionProcessTransport:
                 f'Не удалось отправить команду {command_request.command}: {err}'
             ) from err
 
-    async def receive_session_event(self) -> Optional[SessionEvent]:
+    async def _receive_session_event(self) -> Optional[SessionEvent]:
         """Получает и валидирует очередное событие из `response_queue`.
 
         Returns:
@@ -236,7 +257,7 @@ class _SessionProcessTransport:
                 f'Получено некорректное событие из response_queue: {err}'
             ) from err
 
-    async def receive_data(self) -> Optional[PackageType]:
+    async def _receive_data(self) -> Optional[PackageType]:
         """Получает и проверяет очередной пакет из `data_queue`.
 
         Returns:
@@ -263,58 +284,168 @@ class _SessionProcessTransport:
 
         return package_data
 
-    async def request_session_stop(self) -> None:
-        """Отправляет специальную команду штатной остановки сессии."""
-        if not self.is_active:
-            return
-
-        try:
-            await self.send_command(CommandRequest(command=CommandName.STOP_RUNNING))
-        except ComPortReaderException as err:
-            self._logger.warning(f'Не удалось отправить команду остановки сессии МК: {err}')
-
-    async def wait_session_process(
+    async def shutdown(
             self,
-            timeout_ms: int = _DEFAULT_PROCESS_TIMEOUT_MS) -> None:
-        """Ожидает процесс и при необходимости завершает его принудительно.
+            process_timeout_ms: int = _DEFAULT_PROCESS_TIMEOUT_MS,
+            reader_timeout_ms: int = _DEFAULT_READER_TIMEOUT_MS) -> None:
+        """Останавливает дочерний процесс и освобождает все ресурсы транспорта.
 
         Args:
-            timeout_ms: Время ожидания штатного завершения процесса.
+            process_timeout_ms: Время ожидания штатного завершения процесса.
+            reader_timeout_ms: Время ожидания естественного завершения readers.
 
         Raises:
-            ComPortReaderException: Процесс не удалось завершить.
+            ComPortReaderException: Не удалось полностью освободить ресурсы.
         """
-        await asyncio.to_thread(self._wait_session_process, timeout_ms)
+        if not self.has_resources:
+            return
+
+        self._is_stopping = True
+        cleanup_errors: list[Exception] = []
+
         if self.is_active:
-            raise ComPortReaderException('Не удалось завершить дочерний процесс сессии МК!')
+            try:
+                await self.send_command(
+                    CommandRequest(command=CommandName.STOP_RUNNING)
+                )
+            except ComPortReaderException as err:
+                # Процесс мог завершиться между проверкой is_active и отправкой.
+                self._logger.warning(
+                    f'Не удалось отправить команду остановки сессии МК: {err}'
+                )
 
-    async def close_resources(self) -> None:
-        """Закрывает IPC-очереди и дескриптор завершённого процесса.
+        process = self._mc_session_process
+        if process is not None and process.pid is not None:
+            if self.is_active:
+                self._logger.debug(
+                    'Ожидание завершения дочернего процесса сессии МК'
+                )
+                await asyncio.to_thread(process.join, process_timeout_ms / 1000)
 
-        Raises:
-            ComPortReaderException: Дочерний процесс ещё выполняется либо его
-                дескриптор не удалось закрыть.
-        """
-        if self.is_active:
-            raise ComPortReaderException(
-                'Нельзя освобождать IPC-ресурсы работающей дочерней сессии!'
-            )
+            if self.is_active:
+                self._logger.warning(
+                    'Дочерний процесс не завершился штатно, выполняется terminate()'
+                )
+                process.terminate()
+                await asyncio.to_thread(process.join, 1)
 
-        await asyncio.to_thread(self._close_ipc_queues)
-        self._close_session_process()
+            if self.is_active and hasattr(process, 'kill'):
+                self._logger.warning(
+                    'Дочерний процесс не завершился после terminate(), '
+                    'выполняется kill()'
+                )
+                process.kill()
+                await asyncio.to_thread(process.join, 1)
+
+            if self.is_active:
+                cleanup_errors.append(
+                    ComPortReaderException(
+                        'Не удалось завершить дочерний процесс сессии МК'
+                    )
+                )
+            else:
+                self._logger.debug(
+                    f'Дочерний процесс завершён с кодом {process.exitcode}'
+                )
+
+        reader_tasks = [task for task in (self._response_reader_task, self._data_reader_task)
+                        if task is not None]
+        if reader_tasks:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*reader_tasks, return_exceptions=True),
+                    timeout=reader_timeout_ms / 1000,
+                )
+            except asyncio.TimeoutError:
+                for task in reader_tasks:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*reader_tasks, return_exceptions=True)
+                cleanup_errors.append(
+                    ComPortReaderException(
+                        'Задачи чтения IPC-очередей не остановились вовремя'
+                    )
+                )
+
+        if self._response_reader_task is not None and self._response_reader_task.done():
+            self._response_reader_task = None
+        if self._data_reader_task is not None and self._data_reader_task.done():
+            self._data_reader_task = None
+
+        if not self.is_active and (
+                self._response_reader_task is None
+                and self._data_reader_task is None
+        ):
+            for attribute_name, queue_name in (
+                    ('_command_queue', 'command_queue'),
+                    ('_response_queue', 'response_queue'),
+                    ('_data_queue', 'data_queue')):
+                source_queue = getattr(self, attribute_name)
+                if source_queue is None:
+                    continue
+                try:
+                    await asyncio.to_thread(source_queue.close)
+                    await asyncio.to_thread(source_queue.join_thread)
+                    self._logger.debug(f'Очередь {queue_name} закрыта')
+                except (OSError, ValueError) as err:
+                    self._logger.debug(
+                        f'Очередь {queue_name} уже закрыта или недоступна: {err}'
+                    )
+                finally:
+                    setattr(self, attribute_name, None)
+
+            if process is not None:
+                try:
+                    process.close()
+                except ValueError as err:
+                    cleanup_errors.append(
+                        ComPortReaderException(
+                            f'Не удалось закрыть дескриптор дочернего процесса: {err}'
+                        )
+                    )
+                else:
+                    self._mc_session_process = None
+
+        if not self.has_resources:
+            self._is_stopping = False
+
+        if cleanup_errors:
+            for error in cleanup_errors[1:]:
+                self._logger.error(f'Дополнительная ошибка завершения: {error}')
+            raise cleanup_errors[0]
 
     # =============================================================
     # ======================= Работа с IPC ========================
     # =============================================================
 
-    async def _receive_queue_item(
-            self,
-            source_queue: Queue,
-            queue_name: str) -> Optional[object]:
+    def _start_reader_tasks(self) -> None:
+        """Запускает задачи постоянного чтения событий и данных."""
+        if self._response_reader_task is not None or self._data_reader_task is not None:
+            raise ComPortReaderException('Задачи чтения IPC-очередей уже созданы')
+
+        self._response_reader_task = asyncio.create_task(
+            self._reading_response_queue(),
+            name='telega_response_queue_reader',
+        )
+        self._data_reader_task = asyncio.create_task(
+            self._reading_data_queue(),
+            name='telega_data_queue_reader',
+        )
+
+    @staticmethod
+    async def _receive_queue_item(source_queue: Queue, queue_name: str) -> Optional[object]:
         """Асинхронно получает один необработанный элемент IPC-очереди."""
+
+        def get_queue_item(queue: Queue) -> Optional[object]:
+            """Блокирующе получает элемент либо возвращает ``None`` по таймауту."""
+            try:
+                return queue.get(timeout=_QUEUE_READ_TIMEOUT_SECONDS)
+            except Empty:
+                return None
+
         try:
-            has_item, item = await asyncio.to_thread(
-                _get_queue_item,
+            return await asyncio.to_thread(
+                get_queue_item,
                 source_queue,
             )
         except (EOFError, OSError, ValueError) as err:
@@ -322,83 +453,64 @@ class _SessionProcessTransport:
                 f'Ошибка чтения очереди {queue_name}: {err}'
             ) from err
 
-        return item if has_item else None
-
-    # =============================================================
-    # ===================== Завершение ресурсов ===================
-    # =============================================================
-
-    def _wait_session_process(self, timeout_ms: int) -> None:
-        """Блокирующе ожидает и при необходимости завершает процесс."""
-        process = self._mc_session_process
-        if process is None or process.pid is None:
-            return
-
-        if self.is_active:
-            self._logger.debug('Ожидание завершения дочернего процесса сессии МК')
-            process.join(timeout_ms / 1000)
-
-        if self.is_active:
-            self._logger.warning(
-                'Дочерний процесс сессии МК не завершился штатно, выполняется terminate()'
-            )
-            process.terminate()
-            process.join(1)
-
-        if self.is_active and hasattr(process, 'kill'):
-            self._logger.warning(
-                'Дочерний процесс сессии МК не завершился после terminate(), выполняется kill()'
-            )
-            process.kill()
-            process.join(1)
-
-        if self.is_active:
-            self._logger.error('Не удалось завершить дочерний процесс сессии МК')
-        else:
-            self._logger.debug(
-                f'Дочерний процесс сессии МК завершён с кодом {process.exitcode}'
-            )
-
-    def _close_ipc_queues(self) -> None:
-        """Блокирующе закрывает все IPC-очереди."""
-        queue_attributes = (
-            ('_command_queue', 'command_queue'),
-            ('_response_queue', 'response_queue'),
-            ('_data_queue', 'data_queue'),
-        )
-        for attribute_name, queue_name in queue_attributes:
-            source_queue = getattr(self, attribute_name)
-            if source_queue is None:
-                continue
-
-            try:
-                source_queue.close()
-                source_queue.join_thread()
-                self._logger.debug(f'Очередь {queue_name} закрыта')
-            except (OSError, ValueError) as err:
-                self._logger.debug(
-                    f'Очередь {queue_name} уже закрыта или недоступна: {err}'
-                )
-            finally:
-                setattr(self, attribute_name, None)
-
-    def _close_session_process(self) -> None:
-        """Закрывает дескриптор завершённого дочернего процесса."""
-        process = self._mc_session_process
-        if process is None:
-            return
-        if self.is_active:
-            raise ComPortReaderException('Нельзя закрыть дескриптор работающего процесса!')
-
+    async def _reading_response_queue(self) -> None:
+        """Постоянно читает события сессии и передаёт их обработчику."""
+        self._logger.debug('Запуск async-чтения response_queue')
         try:
-            process.close()
-        except ValueError as err:
-            raise ComPortReaderException(
-                f'Не удалось закрыть дескриптор дочернего процесса: {err}'
-            ) from err
+            while True:
+                session_event = await self._receive_session_event()
+                if session_event is None:
+                    if not self.is_active:
+                        if not self._is_stopping:
+                            self._error_handler(
+                                SessionNotRunning(
+                                    'Дочерняя сессия завершилась без SESSION_STOPPED'
+                                )
+                            )
+                        return
+                    continue
 
-        self._mc_session_process = None
+                if session_event.event is SessionEventName.SESSION_STOPPED:
+                    self._session_event_handler(session_event)
+                    return
+                self._session_event_handler(session_event)
+        except asyncio.CancelledError:
+            self._logger.debug('Задача чтения response_queue отменена')
+            raise
+        except ComPortReaderException as err:
+            self._error_handler(err)
+        except Exception as err:
+            self._logger.exception(f'Неожиданная ошибка чтения response_queue: {err}')
+            self._error_handler(
+                ComPortReaderException(f'Неожиданная ошибка response_queue: {err}')
+            )
+        finally:
+            self._logger.debug('Остановка async-чтения response_queue')
 
+    async def _reading_data_queue(self) -> None:
+        """Постоянно читает пакеты данных и передаёт их обработчику."""
+        self._logger.debug('Запуск async-чтения data_queue')
+        try:
+            while True:
+                package = await self._receive_data()
+                if package is None:
+                    if not self.is_active:
+                        return
+                    continue
+
+                self._data_handler(package)
+        except asyncio.CancelledError:
+            self._logger.debug('Задача чтения data_queue отменена')
+            raise
+        except ComPortReaderException as err:
+            self._error_handler(err)
+        except Exception as err:
+            self._logger.exception(f'Неожиданная ошибка чтения data_queue: {err}')
+            self._error_handler(
+                ComPortReaderException(f'Неожиданная ошибка data_queue: {err}')
+            )
+        finally:
+            self._logger.debug('Остановка async-чтения data_queue')
 
 # =============================================================
 # ===================== Асинхронный фасад ======================
@@ -409,9 +521,9 @@ class ComPortReader:
     """Предоставляет Qt-free asyncio API для взаимодействия с сессией МК.
 
     Одновременно допускается ровно одна команда, ожидающая терминальный
-    результат. Публичные command-методы возвращают валидированный
-    :class:`SessionEvent`. Самостоятельные события, пакеты данных и ошибки
-    доступны через отдельные awaitable-методы.
+    результат. Публичные command-методы завершаются без возвращаемого значения
+    либо возбуждают предметное исключение. Самостоятельные события, пакеты
+    данных и ошибки доступны через отдельные awaitable-методы.
 
     Args:
         logger: Логгер родительского приложения.
@@ -449,24 +561,24 @@ class ComPortReader:
 
         self._logger: logging.Logger = logger
         self._command_timeout_seconds: float = command_timeout_seconds
-        self._transport: _SessionProcessTransport = _SessionProcessTransport(logger)
 
         self._is_configured: bool = False
         self._is_synchronized: bool = True
-        self._is_shutting_down: bool = False
-        self._session_stopped_received: bool = False
+        self._is_closed: bool = False
+        self._cleanup_lock: asyncio.Lock = asyncio.Lock()
 
         self._pending_result: Optional[asyncio.Future[SessionEvent]] = None
         self._expected_result_event: Optional[SessionEventName] = None
 
-        self._response_reader_task: Optional[asyncio.Task[None]] = None
-        self._data_reader_task: Optional[asyncio.Task[None]] = None
-        self._background_shutdown_task: Optional[asyncio.Task[None]] = None
-        self._shutdown_lock: asyncio.Lock = asyncio.Lock()
-
         self._session_events: asyncio.Queue[SessionEvent] = asyncio.Queue()
         self._received_data: asyncio.Queue[PackageType] = asyncio.Queue(maxsize=1)
         self._errors: asyncio.Queue[ComPortReaderException] = asyncio.Queue()
+        self._transport: _SessionProcessTransport = _SessionProcessTransport(
+            logger,
+            self._session_event_handler,
+            self._data_handler,
+            self._handle_background_failure,
+        )
 
     @property
     def is_active(self) -> bool:
@@ -485,7 +597,7 @@ class ComPortReader:
     async def configure(self,
                         logger_config: LoggerConfig,
                         com_port_name: str,
-                        bin_file: Path) -> SessionEvent:
+                        bin_file: Path) -> None:
         """Запускает дочернюю сессию и ожидает результат handshake.
 
         Args:
@@ -493,15 +605,16 @@ class ComPortReader:
             com_port_name: Имя COM-порта.
             bin_file: Файл исходного байтового потока.
 
-        Returns:
-            `HANDSHAKE_INIT_RESULT` с параметрами результата.
-
         Raises:
+            CommandExecutionError: Handshake завершился отрицательным результатом.
             ComPortReaderException: Сессия уже запущена или запуск не удался.
             NeedConfiguration: Имя COM-порта не задано.
             TypeError: `bin_file` не является :class:`Path`.
         """
-        await self._wait_background_shutdown()
+        if self._is_closed:
+            raise ComPortReaderException('ComPortReader уже окончательно закрыт')
+        if self._cleanup_lock.locked():
+            raise ComPortReaderException('Выполняется освобождение ресурсов сессии')
         if self.is_active:
             raise ComPortReaderException(
                 'Нельзя изменить параметры при запущенной сессии взаимодействия с МК!'
@@ -512,11 +625,13 @@ class ComPortReader:
             raise TypeError(f'Ожидается bin_file: Path, получен {type(bin_file)}')
 
         if self._transport.has_resources:
-            await self.shutdown()
+            raise ComPortReaderException(
+                'Перед конфигурированием необходимо выполнить reset()'
+            )
 
         self._clear_received_items()
+        self._is_configured = False
         self._is_synchronized = True
-        self._session_stopped_received = False
         com_port_config = ComPortConfig(name=com_port_name, baudrate=115200)
         self._logger.debug(
             f'Конфигурирование ComPortReader: port={com_port_name}, bin_file={bin_file}'
@@ -524,30 +639,31 @@ class ComPortReader:
 
         try:
             self._transport.start(logger_config, com_port_config, bin_file)
+            await self._execute_command(
+                CommandName.HANDSHAKE_INIT,
+                require_configuration=False,
+            )
             self._is_configured = True
-            self._start_reader_tasks()
-            return await self._execute_command(CommandName.HANDSHAKE_INIT)
         except asyncio.CancelledError:
+            self._is_configured = False
             self._is_synchronized = False
-            self._schedule_shutdown()
             raise
         except Exception:
+            self._is_configured = False
+            self._is_synchronized = False
             self._logger.exception(
-                'Ошибка конфигурирования ComPortReader, выполняется очистка ресурсов'
+                'Ошибка конфигурирования ComPortReader'
             )
-            await self._shutdown_after_configuration_error()
             raise
 
-    async def set_saving_file(self, file_path: Path) -> SessionEvent:
+    async def set_saving_file(self, file_path: Path) -> None:
         """Устанавливает CSV-файл и ожидает результат его подготовки.
 
         Args:
             file_path: Абсолютный путь к CSV-файлу.
 
-        Returns:
-            `SET_SAVING_FILE_RESULT`.
-
         Raises:
+            CommandExecutionError: Файл не удалось подготовить.
             TypeError: `file_path` не является :class:`Path`.
             ValueError: Путь не абсолютный.
             ComPortReaderException: Команду невозможно выполнить.
@@ -557,31 +673,37 @@ class ComPortReader:
         if not file_path.is_absolute():
             raise ValueError('Путь к CSV-файлу должен быть абсолютным')
 
-        return await self._execute_command(
+        await self._execute_command(
             CommandName.SET_SAVING_FILE,
             params={'filepath': str(file_path)},
         )
 
-    async def start_static_init(self) -> SessionEvent:
-        """Запускает статический набор и ожидает подтверждение переключения МК."""
-        return await self._execute_command(CommandName.START_STATIC_INIT)
+    async def start_static_init(self) -> None:
+        """Запускает статический набор и ожидает подтверждение переключения МК.
 
-    async def start_measuring(self) -> SessionEvent:
-        """Запускает измерения и ожидает подтверждение переключения МК."""
-        return await self._execute_command(CommandName.START_MEASURING)
+        Raises:
+            CommandExecutionError: Статический набор не удалось запустить.
+            ComPortReaderException: Команду невозможно выполнить.
+        """
+        await self._execute_command(CommandName.START_STATIC_INIT)
 
-    async def stop_measuring(self) -> SessionEvent:
-        """Останавливает измерения и ожидает терминальный результат команды."""
-        return await self._execute_command(CommandName.STOP_MEASURING)
+    async def start_measuring(self) -> None:
+        """Запускает измерения и ожидает подтверждение переключения МК.
 
-    async def stop_running(self) -> None:
-        """Отправляет специальную команду завершения без командного `Future`."""
-        self._ensure_session_running()
-        if self._pending_result is not None:
-            raise CommandAlreadyPending(
-                'Нельзя отдельно отправить STOP_RUNNING во время ожидания другой команды'
-            )
-        await self._transport.request_session_stop()
+        Raises:
+            CommandExecutionError: Измерения не удалось запустить.
+            ComPortReaderException: Команду невозможно выполнить.
+        """
+        await self._execute_command(CommandName.START_MEASURING)
+
+    async def stop_measuring(self) -> None:
+        """Останавливает измерения и ожидает терминальный результат команды.
+
+        Raises:
+            CommandExecutionError: Измерения не удалось остановить штатно.
+            ComPortReaderException: Команду невозможно выполнить.
+        """
+        await self._execute_command(CommandName.STOP_MEASURING)
 
     async def receive_session_event(self) -> SessionEvent:
         """Ожидает самостоятельное событие сессии."""
@@ -595,11 +717,35 @@ class ComPortReader:
         """Ожидает транспортную или протокольную ошибку фонового чтения."""
         return await self._errors.get()
 
+    async def reset(
+            self,
+            process_timeout_ms: int = _DEFAULT_PROCESS_TIMEOUT_MS,
+            reader_timeout_ms: int = _DEFAULT_READER_TIMEOUT_MS) -> None:
+        """Освобождает текущую сессию и разрешает повторное конфигурирование.
+
+        Args:
+            process_timeout_ms: Время ожидания штатного завершения процесса.
+            reader_timeout_ms: Время ожидания естественной остановки readers.
+
+        Raises:
+            ComPortReaderException: Объект окончательно закрыт либо ресурсы
+                не удалось полностью освободить.
+        """
+        if self._is_closed:
+            raise ComPortReaderException(
+                'Нельзя сбросить окончательно закрытый ComPortReader'
+            )
+        await self._cleanup(
+            process_timeout_ms,
+            reader_timeout_ms,
+            close_reader=False,
+        )
+
     async def shutdown(
             self,
             process_timeout_ms: int = _DEFAULT_PROCESS_TIMEOUT_MS,
             reader_timeout_ms: int = _DEFAULT_READER_TIMEOUT_MS) -> None:
-        """Асинхронно завершает процесс, readers и IPC-ресурсы.
+        """Освобождает текущую сессию и окончательно закрывает объект.
 
         Args:
             process_timeout_ms: Время ожидания штатного завершения процесса.
@@ -608,33 +754,13 @@ class ComPortReader:
         Raises:
             ComPortReaderException: Ресурсы не удалось полностью освободить.
         """
-        async with self._shutdown_lock:
-            if not self._transport.has_resources:
-                self._reset_session_state()
-                return
-
-            self._logger.debug('Завершение работы ComPortReader')
-            self._is_shutting_down = True
-            self._is_configured = False
-            self._fail_pending_result(
-                SessionNotRunning('Сессия завершается до получения результата команды')
-            )
-
-            try:
-                await self._transport.request_session_stop()
-                await self._transport.wait_session_process(process_timeout_ms)
-                await self._wait_reader_tasks(reader_timeout_ms)
-                await self._transport.close_resources()
-            finally:
-                self._response_reader_task = None
-                self._data_reader_task = None
-                self._reset_session_state()
-
-            self._logger.debug('Завершение работы ComPortReader выполнено')
-
-    async def close(self) -> None:
-        """Асинхронно закрывает `ComPortReader`."""
-        await self.shutdown()
+        if self._is_closed:
+            return
+        await self._cleanup(
+            process_timeout_ms,
+            reader_timeout_ms,
+            close_reader=True,
+        )
 
     # =============================================================
     # ======================= Внутренняя логика ===================
@@ -643,9 +769,24 @@ class ComPortReader:
     async def _execute_command(
             self,
             command: CommandName,
-            params: Optional[dict[str, object]] = None) -> SessionEvent:
-        """Отправляет одну команду и ожидает соответствующий результат."""
-        self._ensure_session_running()
+            params: Optional[dict[str, object]] = None,
+            require_configuration: bool = True) -> None:
+        """Отправляет одну команду и проверяет её терминальный результат.
+
+        Args:
+            command: Отправляемая команда.
+            params: Параметры команды.
+            require_configuration: Требовать успешный handshake перед отправкой.
+
+        Raises:
+            CommandExecutionError: Команда завершилась отрицательным результатом.
+            ComPortReaderException: Команду невозможно выполнить либо нарушен
+                протокол сессии.
+        """
+        if require_configuration:
+            self._ensure_session_running()
+        else:
+            self._ensure_transport_running()
         if self._pending_result is not None:
             raise CommandAlreadyPending(
                 'Предыдущая команда ещё не получила терминальный результат'
@@ -667,24 +808,36 @@ class ComPortReader:
             await self._transport.send_command(
                 CommandRequest(command=command, params=params or {})
             )
-            return await asyncio.wait_for(
+            session_event = await asyncio.wait_for(
                 future,
                 timeout=self._command_timeout_seconds,
             )
         except asyncio.TimeoutError as err:
+            self._is_configured = False
             self._is_synchronized = False
-            self._schedule_shutdown()
             raise CommandResultTimeout(
                 f'Истёк таймаут ожидания события {expected_event}'
             ) from err
         except asyncio.CancelledError:
+            self._is_configured = False
             self._is_synchronized = False
-            self._schedule_shutdown()
             raise
         except ComPortReaderException:
+            self._is_configured = False
             self._is_synchronized = False
-            self._schedule_shutdown()
             raise
+        else:
+            success = session_event.params['success']
+            if success:
+                return
+
+            error_info = session_event.params['error_info']
+            if command is not CommandName.SET_SAVING_FILE:
+                # По контракту ControllerTelega любой отрицательный результат,
+                # кроме SET_SAVING_FILE_RESULT, завершает текущую сессию.
+                self._is_configured = False
+                self._is_synchronized = False
+            raise CommandExecutionError(command, error_info)
         finally:
             if self._pending_result is future:
                 self._pending_result = None
@@ -694,6 +847,10 @@ class ComPortReader:
         """Проверяет конфигурацию, синхронизацию и активность сессии."""
         if not self._is_configured:
             raise NeedConfiguration('Перед началом работы задайте параметры подключения!')
+        self._ensure_transport_running()
+
+    def _ensure_transport_running(self) -> None:
+        """Проверяет синхронизацию и активность транспорта сессии."""
         if not self._is_synchronized:
             raise SessionDesynchronized(
                 'Сессия рассинхронизирована и должна быть перезапущена'
@@ -701,81 +858,15 @@ class ComPortReader:
         if not self.is_active:
             raise SessionNotRunning('Сессия взаимодействия с МК не запущена!')
 
-    def _start_reader_tasks(self) -> None:
-        """Запускает async-задачи чтения очередей событий и данных."""
-        if self._response_reader_task is not None or self._data_reader_task is not None:
-            raise ComPortReaderException('Задачи чтения IPC-очередей уже созданы')
-
-        self._response_reader_task = asyncio.create_task(
-            self._reading_response_queue(),
-            name='telega_response_queue_reader',
-        )
-        self._data_reader_task = asyncio.create_task(
-            self._reading_data_queue(),
-            name='telega_data_queue_reader',
-        )
-
-    async def _reading_response_queue(self) -> None:
-        """Читает `response_queue` и маршрутизирует события сессии."""
-        self._logger.debug('Запуск async-чтения response_queue')
-        try:
-            while True:
-                session_event = await self._transport.receive_session_event()
-                if session_event is None:
-                    if not self.is_active:
-                        if not self._is_shutting_down and not self._session_stopped_received:
-                            self._handle_background_failure(
-                                SessionNotRunning(
-                                    'Дочерняя сессия завершилась без SESSION_STOPPED'
-                                )
-                            )
-                        return
-                    continue
-
-                self._session_event_handler(session_event)
-        except asyncio.CancelledError:
-            self._logger.debug('Задача чтения response_queue отменена')
-            raise
-        except ComPortReaderException as err:
-            self._handle_background_failure(err)
-        except Exception as err:
-            self._logger.exception(f'Неожиданная ошибка чтения response_queue: {err}')
-            self._handle_background_failure(
-                ComPortReaderException(f'Неожиданная ошибка response_queue: {err}')
-            )
-        finally:
-            self._logger.debug('Остановка async-чтения response_queue')
-
-    async def _reading_data_queue(self) -> None:
-        """Читает `data_queue` и сохраняет только последний пакет для GUI."""
-        self._logger.debug('Запуск async-чтения data_queue')
-        try:
-            while True:
-                package = await self._transport.receive_data()
-                if package is None:
-                    if not self.is_active:
-                        return
-                    continue
-
-                if self._received_data.full():
-                    self._received_data.get_nowait()
-                self._received_data.put_nowait(package)
-        except asyncio.CancelledError:
-            self._logger.debug('Задача чтения data_queue отменена')
-            raise
-        except ComPortReaderException as err:
-            self._handle_background_failure(err)
-        except Exception as err:
-            self._logger.exception(f'Неожиданная ошибка чтения data_queue: {err}')
-            self._handle_background_failure(
-                ComPortReaderException(f'Неожиданная ошибка data_queue: {err}')
-            )
-        finally:
-            self._logger.debug('Остановка async-чтения data_queue')
-
     # =============================================================
     # ===================== Обработка событий =====================
     # =============================================================
+
+    def _data_handler(self, package: PackageType) -> None:
+        """Сохраняет только последний пакет данных для GUI."""
+        if self._received_data.full():
+            self._received_data.get_nowait()
+        self._received_data.put_nowait(package)
 
     def _session_event_handler(self, session_event: SessionEvent) -> None:
         """Маршрутизирует результат команды или самостоятельное событие."""
@@ -790,9 +881,11 @@ class ComPortReader:
             return
 
         if session_event.event is SessionEventName.SESSION_STOPPED:
-            self._session_stopped_received = True
-            self._session_events.put_nowait(session_event)
-            self._schedule_shutdown()
+            self._is_configured = False
+            if not self._cleanup_lock.locked():
+                self._handle_background_failure(
+                    SessionNotRunning('Дочерняя сессия завершила работу')
+                )
             return
 
         if session_event.event is SessionEventName.STATIC_INIT_COMPLETED:
@@ -882,12 +975,12 @@ class ComPortReader:
         self._handle_background_failure(error)
 
     def _handle_background_failure(self, error: ComPortReaderException) -> None:
-        """Завершает pending-команду и запускает аварийную остановку сессии."""
+        """Переводит сессию в нерабочее состояние и передаёт ошибку GUI."""
         self._logger.error(str(error))
+        self._is_configured = False
         self._is_synchronized = False
         self._fail_pending_result(error)
         self._report_background_error(error)
-        self._schedule_shutdown()
 
     def _fail_pending_result(self, error: ComPortReaderException) -> None:
         """Завершает ожидающий `Future` исключением, если он ещё активен."""
@@ -903,91 +996,43 @@ class ComPortReader:
     # ======================== Завершение =========================
     # =============================================================
 
-    def _schedule_shutdown(self) -> None:
-        """Создаёт одну контролируемую задачу аварийного завершения."""
-        if not self._transport.has_resources:
-            return
-        if (
-                self._background_shutdown_task is not None
-                and not self._background_shutdown_task.done()
-        ):
-            return
+    async def _cleanup(
+            self,
+            process_timeout_ms: int,
+            reader_timeout_ms: int,
+            close_reader: bool) -> None:
+        """Освобождает ресурсы текущей сессии и обновляет состояние объекта."""
+        async with self._cleanup_lock:
+            if self._is_closed:
+                if close_reader:
+                    return
+                raise ComPortReaderException(
+                    'Нельзя сбросить окончательно закрытый ComPortReader'
+                )
 
-        task = asyncio.create_task(
-            self.shutdown(),
-            name='telega_session_shutdown',
-        )
-        self._background_shutdown_task = task
-        task.add_done_callback(self._background_shutdown_done)
-
-    def _background_shutdown_done(self, task: asyncio.Task[None]) -> None:
-        """Получает результат фонового завершения и журналирует его ошибку."""
-        if self._background_shutdown_task is task:
-            self._background_shutdown_task = None
-        if task.cancelled():
-            return
-
-        error = task.exception()
-        if error is not None:
-            self._logger.error(
-                f'Ошибка фонового завершения ComPortReader: {error}',
-                exc_info=(type(error), error, error.__traceback__),
-            )
-            reported_error = (
-                error
-                if isinstance(error, ComPortReaderException)
-                else ComPortReaderException(str(error))
-            )
-            self._report_background_error(reported_error)
-
-    async def _wait_background_shutdown(self) -> None:
-        """Дожидается ранее запущенного аварийного завершения."""
-        task = self._background_shutdown_task
-        if task is None or task.done():
-            return
-        await asyncio.shield(task)
-
-    async def _wait_reader_tasks(self, timeout_ms: int) -> None:
-        """Ожидает естественную остановку readers и отменяет их по таймауту."""
-        tasks = [
-            task
-            for task in (self._response_reader_task, self._data_reader_task)
-            if task is not None
-        ]
-        if not tasks:
-            return
-
-        try:
-            await asyncio.wait_for(
-                asyncio.gather(*tasks, return_exceptions=True),
-                timeout=timeout_ms / 1000,
-            )
-        except asyncio.TimeoutError as err:
-            for task in tasks:
-                if not task.done():
-                    task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
-            raise ComPortReaderException(
-                'Задачи чтения IPC-очередей не остановились вовремя'
-            ) from err
-
-    async def _shutdown_after_configuration_error(self) -> None:
-        """Освобождает частично созданные ресурсы после ошибки запуска."""
-        try:
-            await self.shutdown()
-        except Exception as err:
-            self._logger.exception(
-                f'Не удалось очистить ресурсы после ошибки конфигурирования: {err}'
+            self._logger.debug('Освобождение ресурсов ComPortReader')
+            self._is_configured = False
+            self._is_synchronized = False
+            self._fail_pending_result(
+                SessionNotRunning('Сессия завершается до получения результата команды')
             )
 
-    def _reset_session_state(self) -> None:
-        """Сбрасывает состояние завершённой сессии для следующего запуска."""
-        self._is_configured = False
-        self._is_synchronized = True
-        self._is_shutting_down = False
-        self._session_stopped_received = False
-        self._pending_result = None
-        self._expected_result_event = None
+            try:
+                await self._transport.shutdown(
+                    process_timeout_ms,
+                    reader_timeout_ms,
+                )
+            finally:
+                self._pending_result = None
+                self._expected_result_event = None
+                if self._transport.has_resources:
+                    self._is_synchronized = False
+                else:
+                    self._clear_received_items()
+                    self._is_synchronized = True
+                    self._is_closed = close_reader
+
+            self._logger.debug('Ресурсы ComPortReader освобождены')
 
     def _clear_received_items(self) -> None:
         """Удаляет события, данные и ошибки предыдущей сессии."""
