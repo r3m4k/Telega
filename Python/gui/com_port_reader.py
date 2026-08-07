@@ -760,9 +760,8 @@ class ComPortReader:
                 f'Для команды {command.name} не определён терминальный результат'
             )
 
-        future: asyncio.Future[SessionEvent] = (
-            asyncio.get_running_loop().create_future()
-        )
+        future: asyncio.Future[SessionEvent] = asyncio.get_running_loop().create_future()
+
         self._pending_result = future
         self._expected_result_event = expected_event
 

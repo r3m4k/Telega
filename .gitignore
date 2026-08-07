@@ -26,6 +26,7 @@ dist/
 **/.env
 
 # Logs and profiling output
+**/.logs/
 *.log
 *.log.bkp
 

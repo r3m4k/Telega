@@ -4,7 +4,6 @@
 import asyncio
 import logging
 from datetime import datetime
-from enum import Enum, auto
 from pathlib import Path
 from typing import Optional
 
@@ -44,15 +43,6 @@ from telega_session import TelegaData
 ##########################################################
 
 
-class _PendingOperation(Enum):
-    """Командная операция, результата которой ожидает главное окно."""
-
-    CONFIGURE = auto()
-    START_STATIC_INIT = auto()
-    START_MEASURING = auto()
-    STOP_MEASURING = auto()
-
-
 class MainWindow(QMainWindow):
     """Координирует интерфейс и пользовательские стадии приложения."""
 
@@ -74,7 +64,7 @@ class MainWindow(QMainWindow):
         self._start_indicator()
 
     # =============================================================
-    # ================= Инициализация главного окна ================
+    # ================= Инициализация главного окна ===============
     # =============================================================
 
     def _init_app_context(self) -> None:
@@ -107,8 +97,7 @@ class MainWindow(QMainWindow):
         """Задаёт начальное изменяемое состояние окна."""
         self._saving_path: Optional[Path] = None
         self._template_filename: Optional[str] = None
-        self._pending_operation: Optional[_PendingOperation] = None
-        self._session_resetting: bool = False
+        self._operation_in_progress: bool = False
         self._close_ready: bool = False
         self._close_task: Optional[asyncio.Task[None]] = None
         self._fatal_recovery_task: Optional[asyncio.Task[None]] = None
@@ -273,7 +262,7 @@ class MainWindow(QMainWindow):
             OSError: Настройки приложения не удалось сохранить.
             TypeError: Переданы параметры неподдерживаемого типа.
         """
-        if not self._begin_operation(_PendingOperation.CONFIGURE):
+        if not self._begin_operation():
             return
 
         try:
@@ -289,7 +278,7 @@ class MainWindow(QMainWindow):
                 raw_stream_file=raw_stream_file,
             )
         except Exception:
-            self._finish_operation(_PendingOperation.CONFIGURE)
+            self._finish_operation()
             raise
 
         self._saving_path = resolved_saving_path
@@ -318,32 +307,29 @@ class MainWindow(QMainWindow):
             self._app_logger.info(f'Стадия программы изменена: {stage.name}')
         self._update_controls()
 
-    def _begin_operation(self, operation: _PendingOperation) -> bool:
-        """Синхронно устанавливает маркер ожидания результата операции."""
-        if self._pending_operation is not None or self._session_resetting:
+    def _begin_operation(self) -> bool:
+        """Синхронно устанавливает флаг ожидания результата операции."""
+        if self._operation_in_progress or self._is_session_resetting():
             return False
-        self._pending_operation = operation
+        self._operation_in_progress = True
         self._update_controls()
         return True
 
-    def _finish_operation(self, expected_operation: _PendingOperation) -> bool:
-        """Снимает маркер только для ожидаемого предметного результата."""
-        if self._pending_operation is not expected_operation:
-            self._error_handler(
-                ComPortReaderException(
-                    'Получен результат операции, которая не ожидалась главным окном'
-                )
-            )
-            return False
-        self._pending_operation = None
+    def _finish_operation(self) -> None:
+        """Снимает флаг ожидания результата командной операции."""
+        self._operation_in_progress = False
         self._update_controls()
-        return True
+
+    def _is_session_resetting(self) -> bool:
+        """Проверяет выполнение задачи восстановления аварийной сессии."""
+        recovery_task = self._fatal_recovery_task
+        return recovery_task is not None and not recovery_task.done()
 
     def _update_controls(self) -> None:
         """Централизованно вычисляет доступность командных кнопок."""
         controls_available = (
-            self._pending_operation is None
-            and not self._session_resetting
+            not self._operation_in_progress
+            and not self._is_session_resetting()
             and self._close_task is None
         )
         self._apply_settings_button.setEnabled(
@@ -367,7 +353,7 @@ class MainWindow(QMainWindow):
 
     def start_static_init(self) -> None:
         """Запрашивает подготовку CSV и запуск статического набора."""
-        if not self._begin_operation(_PendingOperation.START_STATIC_INIT):
+        if not self._begin_operation():
             return
         try:
             saving_file = self._build_saving_file('static_init')
@@ -383,7 +369,7 @@ class MainWindow(QMainWindow):
 
     def start_measuring(self) -> None:
         """Запрашивает подготовку CSV и запуск измерений."""
-        if not self._begin_operation(_PendingOperation.START_MEASURING):
+        if not self._begin_operation():
             return
         try:
             saving_file = self._build_saving_file('measuring')
@@ -398,7 +384,7 @@ class MainWindow(QMainWindow):
 
     def stop_measuring(self) -> None:
         """Запрашивает остановку измерений и закрытие CSV-файла."""
-        if not self._begin_operation(_PendingOperation.STOP_MEASURING):
+        if not self._begin_operation():
             return
         passage_num = self._get_passage_num()
         self._app_logger.info(f'Остановка измерений для проезда {passage_num}')
@@ -432,16 +418,14 @@ class MainWindow(QMainWindow):
 
     def _handshake_done(self) -> None:
         """Обрабатывает успешное рукопожатие с МК."""
-        if not self._finish_operation(_PendingOperation.CONFIGURE):
-            return
+        self._finish_operation()
         self._app_logger.info('Рукопожатие с МК выполнено успешно')
         self.add_info_message('Рукопожатие с МК выполнено успешно')
         self._set_stage(self._ready_for_static_init_stage)
 
     def _static_init_started(self) -> None:
         """Обрабатывает подтверждение запуска статического набора."""
-        if not self._finish_operation(_PendingOperation.START_STATIC_INIT):
-            return
+        self._finish_operation()
         self._set_stage(self._static_init_stage)
         self.add_info_message(
             f'Статический набор запущен для проезда #{self._get_passage_num()}'
@@ -466,8 +450,7 @@ class MainWindow(QMainWindow):
 
     def _measuring_started(self) -> None:
         """Обрабатывает подтверждение запуска измерений."""
-        if not self._finish_operation(_PendingOperation.START_MEASURING):
-            return
+        self._finish_operation()
         self._set_stage(self._measuring_stage)
         self.add_info_message(
             f'Измерения запущены для проезда #{self._get_passage_num()}'
@@ -475,8 +458,7 @@ class MainWindow(QMainWindow):
 
     def _measuring_stopped(self) -> None:
         """Обрабатывает остановку измерений после закрытия CSV-файла."""
-        if not self._finish_operation(_PendingOperation.STOP_MEASURING):
-            return
+        self._finish_operation()
         passage_num = self._get_passage_num()
         self._app_logger.info(f'Измерения завершены для проезда {passage_num}')
         self.add_info_message(f'Измерения завершены для проезда #{passage_num}')
@@ -493,14 +475,17 @@ class MainWindow(QMainWindow):
 
     def _error_handler(self, error: ComPortReaderException) -> None:
         """Снимает ожидание и обрабатывает recoverable или фатальную ошибку."""
-        failed_operation = self._pending_operation
-        self._pending_operation = None
+        was_configuring = (
+            self._operation_in_progress
+            and self._current_stage is self._setting_stage
+        )
+        self._operation_in_progress = False
         self._update_controls()
 
         self._app_logger.error(f'Получена ошибка ComPortReader: {error}')
         self.add_error_message('Ошибка выполнения', str(error))
         if not error.fatal_error:
-            if failed_operation is _PendingOperation.CONFIGURE:
+            if was_configuring:
                 self._saving_params.unlock_input()
                 self._com_port_settings.unlock_input()
             self._show_message(
@@ -510,13 +495,15 @@ class MainWindow(QMainWindow):
             )
             return
 
-        if self._fatal_recovery_task is None or self._fatal_recovery_task.done():
-            self._session_resetting = True
-            self._update_controls()
+        if not self._is_session_resetting():
             self._fatal_recovery_task = asyncio.create_task(
                 self._recover_from_fatal_error(),
                 name='com_port_reader_fatal_recovery',
             )
+            self._fatal_recovery_task.add_done_callback(
+                self._fatal_recovery_done
+            )
+            self._update_controls()
         self._show_message(
             QMessageBox.Critical,
             'Ошибка выполнения',
@@ -533,14 +520,22 @@ class MainWindow(QMainWindow):
             )
             self.add_error_message('Ошибка сброса сессии', str(err))
         finally:
-            self._session_resetting = False
             self._reset_to_setting_stage()
+
+    def _fatal_recovery_done(self, task: asyncio.Task[None]) -> None:
+        """Освобождает завершённую задачу восстановления и обновляет GUI."""
+        if self._fatal_recovery_task is task:
+            self._fatal_recovery_task = None
+        self._update_controls()
+        if task.cancelled():
+            return
+        task.exception()
 
     def _reset_to_setting_stage(self) -> None:
         """Очищает состояние сценария и возвращает стадию настройки."""
         self._saving_path = None
         self._template_filename = None
-        self._pending_operation = None
+        self._operation_in_progress = False
         self._saving_params.unlock_input()
         self._com_port_settings.unlock_input()
         self._data_visualizer.reset()
