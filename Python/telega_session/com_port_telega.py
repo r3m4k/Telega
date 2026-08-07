@@ -74,6 +74,13 @@ class ComPortTelega(AsyncComPortDevice):
 
     async def on_stop_measuring(self) -> None:
         self._telega_mc_logger.debug('Остановка чтения данных')
+
+        # Очистим входной буфер, тк рабочий ПК не успевает обработать ACK
+        # на команду _set_foo_stage_command, предположительно из-за медленной
+        # скорости обработки входящего потока байтов, а потеря нескольких
+        # десятков пакетов телеметрии в конце проезда считаем несущественным
+
+        self._discard_pending_port_input()
         await self._send_command_with_ack(self._set_foo_stage_command)
 
     async def on_start_measuring(self) -> None:

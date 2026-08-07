@@ -143,6 +143,15 @@ class AsyncComPort(AsyncBytesSource):
                 'не предоставляет последовательный порт'
             )
 
+        pending_port_input_size = serial_port.in_waiting
+        pending_stream_reader_input_size = len(self._port_reader._buffer) if self._port_reader is not None else 0
+
+        self._com_port_logger.debug(
+            f'Очистка входных буферов порта {self._port_name}: '
+            f'COM-порт — {pending_port_input_size} байт, '
+            f'StreamReader — {pending_stream_reader_input_size} байт'
+        )
+
         serial_port.reset_input_buffer()
         self._com_port_logger.debug(f'Входной буфер порта {self._port_name} очищен')
 

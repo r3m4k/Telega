@@ -96,8 +96,30 @@ class DecoderTelega(DeviceDecoder[TelegaData]):
             self._bin_file.write(bt)
         await super().on_byte_received(bt)
 
+    async def on_stop_measuring(self) -> None:
+        """ При получении команды stop_measuring очистим декодер для приёма ACK """
+        self._clear()
+
     # =============================================================
-    # ================= Внутренняя логика =========================
+    # ============= Декодирование байтов в TelegaData =============
+    # =============================================================
+
+    def _bytes_to_protocol_data(self, byte_list: list[bytes]) -> TelegaData:
+        """ Декодирование байтов в пакет данных TelegaData """
+        return TelegaData(
+            package_num=bytes_to_uint32(byte_list[TelegaDataIndexes.package_num: TelegaDataIndexes.package_num + 4]),
+            acc=bytes_to_triaxial(byte_list[TelegaDataIndexes.acc_index: TelegaDataIndexes.acc_index + 12]),
+            gyro=bytes_to_triaxial(byte_list[TelegaDataIndexes.gyro_index: TelegaDataIndexes.gyro_index + 12]),
+            temp=bytes_to_float(byte_list[TelegaDataIndexes.temp_index: TelegaDataIndexes.temp_index + 4]),
+            dpp_code=bytes_to_int32(byte_list[TelegaDataIndexes.dpp_code_index: TelegaDataIndexes.dpp_code_index + 4])
+        )
+
+    async def _end_of_static_init(self) -> None:
+        """ Процедура отработки сообщения end_of_static_init от МК """
+        await self._bus.stop_static_init.emit()
+
+    # =============================================================
+    # ======= Метода для работы с файлом сохранения данных ========
     # =============================================================
 
     def setup_bin_file(self, bin_file_path: Path) -> None:
@@ -116,17 +138,3 @@ class DecoderTelega(DeviceDecoder[TelegaData]):
         if self._bin_file:
             self._telega_decoder_logger.debug(f"Закрытие файла {self._bin_file.name}")
             self._bin_file.close()
-
-    def _bytes_to_protocol_data(self, byte_list: list[bytes]) -> TelegaData:
-        """ Декодирование байтов в пакет данных TelegaData """
-        return TelegaData(
-            package_num=    bytes_to_uint32(byte_list[TelegaDataIndexes.package_num: TelegaDataIndexes.package_num + 4]),
-            acc=            bytes_to_triaxial(byte_list[TelegaDataIndexes.acc_index: TelegaDataIndexes.acc_index + 12]),
-            gyro=           bytes_to_triaxial(byte_list[TelegaDataIndexes.gyro_index: TelegaDataIndexes.gyro_index + 12]),
-            temp=           bytes_to_float(byte_list[TelegaDataIndexes.temp_index: TelegaDataIndexes.temp_index + 4]),
-            dpp_code=       bytes_to_int32(byte_list[TelegaDataIndexes.dpp_code_index: TelegaDataIndexes.dpp_code_index + 4])
-        )
-
-    async def _end_of_static_init(self) -> None:
-        """ Процедура завершения набора статического буфера перед проездом """
-        await self._bus.stop_static_init.emit()
