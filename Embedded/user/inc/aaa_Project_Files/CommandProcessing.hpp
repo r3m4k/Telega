@@ -60,11 +60,6 @@ namespace Commands{
     inline ByteCommand Set_FooStage_Cmd({0xaa, 0x00}, set_FooStage, ConfirmPolicy::Required);
 
     /**
-     * @brief   Отложенная команда: переход в стадию CalibrationStage.
-     */
-    inline ByteCommand Set_CalibrationStage_Cmd({0xaa, 0x01}, set_CalibrationStage, ConfirmPolicy::Required);
-
-    /**
      * @brief   Отложенная команда: переход в стадию MeasuringStage.
      */
     inline ByteCommand Set_MeasureStage_Cmd({0xaa, 0x02}, set_MeasureStage, ConfirmPolicy::Required);
@@ -82,12 +77,12 @@ namespace Commands{
     /**
      * @brief   Отложенная команда: отправка ack на handshake.
      */
-    inline StringCommand Send_Handshake_Ack_Cmd("HANDSHAKE_ACK", send_handshake_ack, ConfirmPolicy::NotRequired);
+    inline StringCommand Send_Handshake_Ack_Cmd("HANDSHAKE_REQ", send_handshake_ack, ConfirmPolicy::NotRequired);
 
     /**
      * @brief   Отложенная команда: отправка ack на heartbeat.
      */
-    inline StringCommand Send_Heartbeat_Ack_Cmd("HEARTBEAT_ACK", send_heartbeat_ack, ConfirmPolicy::NotRequired);
+    inline StringCommand Send_Heartbeat_Ack_Cmd("HEARTBEAT_REQ", send_heartbeat_ack, ConfirmPolicy::NotRequired);
 
     /**
      * @brief   Системная команда: отправка сообщения об ошибке.
@@ -123,7 +118,6 @@ namespace Commands{
          */
         inline static const BaseCommand* deferred_commands[] = {
             &Set_FooStage_Cmd,
-            &Set_CalibrationStage_Cmd,
             &Set_StaticInitStage_Cmd,
             &Set_MeasureStage_Cmd,
         };

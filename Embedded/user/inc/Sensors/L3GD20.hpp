@@ -9,8 +9,10 @@
 #include "stm32f3_discovery_l3gd20.h"
 #include "TriaxialData.hpp"
 #include "SensorScaler.hpp"
+#include "GpioPin.hpp"
 
 /* Defines -------------------------------------------------------------------*/
+#define INDICATE_L3GD20_READING
 #define TrueAbsGyroVal  4.178074
 
 // -----------------------------------------------------------------------------
@@ -23,7 +25,7 @@ namespace STM_CppLib{
     public:
 
         /* --------------------------------------------
-        * В соответствии с документацией на LSM303DLHC:
+        * В соответствии с документацией на L3GD20:
         * OX = ox
         * OY = oy
         * OZ = oz
@@ -34,6 +36,15 @@ namespace STM_CppLib{
         float gyro_multiplier;          // [mdps/digit]
         float gyro_scale_rate = 1.0f;    // Масштабирующий коэффициент
 
+    #ifdef INDICATE_L3GD20_READING
+        
+        // Пин для индикации чтения данных гироскопа
+        using PinIndicator_GyroReading_t = STM_CppLib::STM_GPIO::GPIO_Pin
+            <STM_CppLib::STM_GPIO::GPIO_Port::PortB, GPIO_PinSource10>;
+        PinIndicator_GyroReading_t gyro_reading_indicator_pin;
+
+    #endif  /*  INDICATE_L3GD20_READING   */
+    
         // ---------------------------------------------------------------------
         // Методы класса
         // ---------------------------------------------------------------------
@@ -84,6 +95,11 @@ namespace STM_CppLib{
                 break; 
             }
 
+        #ifdef INDICATE_L3GD20_READING
+            // Проинициализируем пин-индикатор и принудительно сбросим его
+            gyro_reading_indicator_pin.InitPin();
+            gyro_reading_indicator_pin.ResetPin();
+        #endif  /*  INDICATE_L3GD20_READING   */
         }
 
         void InitGyroScaller(){
@@ -99,6 +115,10 @@ namespace STM_CppLib{
         }
 
         void ReadGyro(){
+        #ifdef INDICATE_L3GD20_READING
+            gyro_reading_indicator_pin.SetPin();
+        #endif  /*  INDICATE_L3GD20_READING   */
+
             uint8_t high_bit = 0;
             uint8_t low_bit = 0;
             
@@ -118,6 +138,10 @@ namespace STM_CppLib{
             gyro_data.z_coord = static_cast<float>(static_cast<int16_t>(high_bit << 8) + low_bit) * gyro_multiplier;
 
             gyro_data *= gyro_scale_rate;
+
+        #ifdef INDICATE_L3GD20_READING
+            gyro_reading_indicator_pin.ResetPin();
+        #endif  /*  INDICATE_L3GD20_READING   */
         }
     };
 

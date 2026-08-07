@@ -173,7 +173,6 @@ RingBuffer<ProgramStage*, 2> program_stage_queue;
 
 // Поддерживаемые стадии программы
 ProgramStage FooStage(FooStage_init, FooStage_execute);
-ProgramStage CalibrationStage(CalibrationStage_init, CalibrationStage_execute);
 ProgramStage StaticStage(StaticStage_init, StaticStage_execute);
 ProgramStage MeasuringStage(MeasuringStage_init, MeasuringStage_execute);
 
@@ -304,39 +303,6 @@ void FooStage_execute(){
     // Возможно, это излишне
     sensor_L3GD20.ReadData();
     sensor_LSM303DLHC.ReadData();
-}
-
-// -------------------------------------------------------------------------------
-
-// Функция для инициализации CalibrationStage
-void CalibrationStage_init(){
-    // Выключим все таймеры
-    timer3.Stop();
-    timer3.ResetCounter();
-    timer4.Stop();
-    timer4.ResetCounter();
-
-    // Включим таймер для индикации работы и оба синих светодиода 
-    leds.LedsOff();
-    leds.LedOn(LED5);
-    leds.LedOn(LED8);
-    timer4.Start();
-
-}
-
-// Функция для исполнения CalibrationStage 
-void CalibrationStage_execute(){
-
-    // Задержка, чтобы отсечь колебания установки от нажатие кнопки оператором
-    Delay(2000);
-
-    // Запустим инициализацию масштабирующего коэффициента датчиков
-    sensor_L3GD20.InitGyroScaller();
-    sensor_LSM303DLHC.InitAccScaller();
-
-    Delay(500);     // Сделаем небольшую паузу перед отправкой сообщения, чтобы ПК успел разобрать предыдущие посылки
-    send_end_of_calibration_msg();
-    program_stage_queue.put(&FooStage);
 }
 
 // -------------------------------------------------------------------------------
