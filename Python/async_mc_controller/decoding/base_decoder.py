@@ -157,6 +157,14 @@ class BaseDecoder(ABC, Generic[T]):
         """
         ...
 
+    async def wait_for_packages(self) -> None:
+        """Ожидает отправки всех декодированных пакетов подписчикам.
+
+        Используется обработчиком DRAIN_PACKAGES после запрета публикации новых
+        пакетов, чтобы ранее декодированные пакеты не остались в очереди.
+        """
+        await self._package_queue.join()
+
     # =============================================================
     # ========= Реализация конечного автомата для разбора =========
     # ========= бинарного потока данных ===========================
@@ -274,7 +282,10 @@ class BaseDecoder(ABC, Generic[T]):
         try:
             while True:
                 data = await self._package_queue.get()
-                await self._package_sending(data)
+                try:
+                    await self._package_sending(data)
+                finally:
+                    self._package_queue.task_done()
         except asyncio.CancelledError:
             self._base_decoder_logger.debug('Цикл эмиссии пакетов остановлен')
             raise

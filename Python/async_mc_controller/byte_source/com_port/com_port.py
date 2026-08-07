@@ -123,6 +123,29 @@ class AsyncComPort(AsyncBytesSource):
         """Установление логгера"""
         self._com_port_logger = logger
 
+    def _discard_pending_port_input(self) -> None:
+        """Отбрасывает непрочитанные данные из входного буфера COM-порта.
+
+        Очищает только буфер последовательного драйвера. Байты, уже переданные
+        в ``StreamReader`` или обработчики приложения, этот метод не затрагивает.
+
+        Raises:
+            RuntimeError: Если COM-порт ещё не открыт или транспорт не предоставляет
+                доступ к экземпляру последовательного порта.
+        """
+        if self._port_writer is None:
+            raise RuntimeError(f'Невозможно очистить входной буфер: порт {self._port_name} не открыт')
+
+        serial_port = self._port_writer.transport.get_extra_info('serial')
+        if serial_port is None:
+            raise RuntimeError(
+                f'Невозможно очистить входной буфер: транспорт порта {self._port_name} '
+                'не предоставляет последовательный порт'
+            )
+
+        serial_port.reset_input_buffer()
+        self._com_port_logger.debug(f'Входной буфер порта {self._port_name} очищен')
+
     async def read_byte(self) -> bytes:
         """Асинхронное чтение одного байта из COM-порта.
 

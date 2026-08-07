@@ -52,9 +52,30 @@ class PackageReadySubscriber(Protocol):
     Пример реализации:
         class Controller:
             async def on_package_ready(self, data: ImuData) -> None:
-                self._received_data.append(data)
+                self._last_data = data
     """
     async def on_package_ready(self, data) -> None: ...
+
+
+# ------------------------------------------
+
+class DrainPackagesSubscriber(Protocol):
+    """Протокол подписчика сигнала Signals.DRAIN_PACKAGES.
+
+    Подписчик запрещает публикацию новых пакетов и завершает обработчик
+    только после отправки всех уже поставленных в очередь пакетов.
+    """
+    async def on_drain_packages(self) -> None: ...
+
+
+# ------------------------------------------
+
+class EnablePackagePublishingSubscriber(Protocol):
+    """Протокол подписчика Signals.ENABLE_PACKAGE_PUBLISHING.
+
+    Подписчик разрешает публикацию новых декодированных пакетов данных.
+    """
+    async def on_enable_package_publishing(self) -> None: ...
 
 
 # ------------------------------------------
@@ -102,38 +123,6 @@ class StopMeasuringSubscriber(Protocol):
                 self._reading_task.cancel()
     """
     async def on_stop_measuring(self) -> None: ...
-
-# ------------------------------------------
-
-class StartCalibrationSubscriber(Protocol):
-    """Протокол подписчика сигнала Signals.START_CALIBRATION.
-
-    Любой объект, реализующий метод on_start_calibration, может быть
-    передан в McBus.start_calibration.subscribe().
-
-    Пример реализации:
-        class ComPortTelega:
-            async def on_start_calibration(self) -> None:
-                self._telega_mc_logger.debug('Начало калибровки')
-                await self._send_command_with_ack(self._set_calibration_stage_command)
-    """
-    async def on_start_calibration(self) -> None: ...
-
-# ------------------------------------------
-
-class StopCalibrationSubscriber(Protocol):
-    """Протокол подписчика сигнала Signals.STOP_CALIBRATION.
-
-    Любой объект, реализующий метод on_stop_calibration, может быть
-    передан в McBus.stop_calibration.subscribe().
-
-    Пример реализации:
-        class ComPortTelega:
-            async def on_stop_calibration(self) -> None:
-                self._telega_mc_logger.debug('Завершение калибровки')
-                await self._send_command_with_ack(self._set_foo_stage_command)
-    """
-    async def on_stop_calibration(self) -> None: ...
 
 # ------------------------------------------
 

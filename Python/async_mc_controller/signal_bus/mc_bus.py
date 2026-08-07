@@ -12,11 +12,11 @@ from .signal_bus import SignalBus
 from .subscribers import (
     NewByteSubscriber,
     PackageReadySubscriber,
+    DrainPackagesSubscriber,
+    EnablePackagePublishingSubscriber,
     StopExecutingSubscriber,
     StartMeasuringSubscriber,
     StopMeasuringSubscriber,
-    StartCalibrationSubscriber,
-    StopCalibrationSubscriber,
     StartStaticInitSubscriber,
     StopStaticInitSubscriber,
     InterruptMeasuringSubscriber,
@@ -65,11 +65,11 @@ class McBus:
     # Высокочастотные сигналы (NEW_BYTE, PACKAGE_READY) намеренно исключены.
     _logged_signals: set[Signals] = {
         Signals.STOP_EXECUTING,
+        Signals.DRAIN_PACKAGES,
+        Signals.ENABLE_PACKAGE_PUBLISHING,
         Signals.START_MEASURING,
         Signals.STOP_MEASURING,
-        Signals.START_CALIBRATION,
         Signals.START_STATIC_INIT,
-        Signals.STOP_CALIBRATION,
         Signals.STOP_STATIC_INIT,
         Signals.INTERRUPT_MEASURING,
         Signals.READ_ERROR,
@@ -138,6 +138,46 @@ class McBus:
         async def emit(data) -> None:
             await McBus._emit(Signals.PACKAGE_READY, data)
 
+    # ------------------------------------------
+
+    class DrainPackagesSignal:
+        """Запрещает новые пакеты и ожидает отправки уже поставленных в очередь."""
+
+        @staticmethod
+        def subscribe(subscriber: DrainPackagesSubscriber) -> None:
+            McBus._signal_bus.subscribe(Signals.DRAIN_PACKAGES, subscriber.on_drain_packages)
+
+        @staticmethod
+        def unsubscribe(subscriber: DrainPackagesSubscriber) -> None:
+            McBus._signal_bus.unsubscribe(Signals.DRAIN_PACKAGES, subscriber.on_drain_packages)
+
+        @staticmethod
+        async def emit() -> None:
+            await McBus._emit(Signals.DRAIN_PACKAGES)
+
+    # ------------------------------------------
+
+    class EnablePackagePublishingSignal:
+        """Разрешает публикацию новых декодированных пакетов данных."""
+
+        @staticmethod
+        def subscribe(subscriber: EnablePackagePublishingSubscriber) -> None:
+            McBus._signal_bus.subscribe(
+                Signals.ENABLE_PACKAGE_PUBLISHING,
+                subscriber.on_enable_package_publishing,
+            )
+
+        @staticmethod
+        def unsubscribe(subscriber: EnablePackagePublishingSubscriber) -> None:
+            McBus._signal_bus.unsubscribe(
+                Signals.ENABLE_PACKAGE_PUBLISHING,
+                subscriber.on_enable_package_publishing,
+            )
+
+        @staticmethod
+        async def emit() -> None:
+            await McBus._emit(Signals.ENABLE_PACKAGE_PUBLISHING)
+
     # =============================================================
     # =================== Управление измерением ===================
     # =============================================================
@@ -188,40 +228,6 @@ class McBus:
         @staticmethod
         async def emit() -> None:
             await McBus._emit(Signals.STOP_MEASURING)
-
-    # ------------------------------------------
-
-    class StartCalibrationSignal:
-        """Эмиттится контроллером для запуска калибровки датчиков."""
-
-        @staticmethod
-        def subscribe(subscriber: StartCalibrationSubscriber) -> None:
-            McBus._signal_bus.subscribe(Signals.START_CALIBRATION, subscriber.on_start_calibration)
-
-        @staticmethod
-        def unsubscribe(subscriber: StartCalibrationSubscriber) -> None:
-            McBus._signal_bus.unsubscribe(Signals.START_CALIBRATION, subscriber.on_start_calibration)
-
-        @staticmethod
-        async def emit() -> None:
-            await McBus._emit(Signals.START_CALIBRATION)
-
-    # ------------------------------------------
-
-    class StopCalibrationSignal:
-        """Эмиттится контроллером при завершении калибровки датчиков."""
-
-        @staticmethod
-        def subscribe(subscriber: StopCalibrationSubscriber) -> None:
-            McBus._signal_bus.subscribe(Signals.STOP_CALIBRATION, subscriber.on_stop_calibration)
-
-        @staticmethod
-        def unsubscribe(subscriber: StopCalibrationSubscriber) -> None:
-            McBus._signal_bus.unsubscribe(Signals.STOP_CALIBRATION, subscriber.on_stop_calibration)
-
-        @staticmethod
-        async def emit() -> None:
-            await McBus._emit(Signals.STOP_CALIBRATION)
 
     # ------------------------------------------
 
@@ -509,15 +515,15 @@ class McBus:
         # Передача данных
         self.new_byte = McBus.NewByteSignal()
         self.package_ready = McBus.PackageReadySignal()
+        self.drain_packages = McBus.DrainPackagesSignal()
+        self.enable_package_publishing = McBus.EnablePackagePublishingSignal()
 
         # Управление измерением
         self.stop_executing = McBus.StopExecutingSignal()
         self.start_measuring = McBus.StartMeasuringSignal()
         self.stop_measuring = McBus.StopMeasuringSignal()
         self.interrupt_measuring = McBus.InterruptMeasuringSignal()
-        self.start_calibration = McBus.StartCalibrationSignal()
         self.start_static_init = McBus.StartStaticInitSignal()
-        self.stop_calibration = McBus.StopCalibrationSignal()
         self.stop_static_init = McBus.StopStaticInitSignal()
 
         # Ошибки чтения

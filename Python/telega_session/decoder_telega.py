@@ -61,7 +61,6 @@ class DecoderTelega(DeviceDecoder[TelegaData]):
     _command_ack: str = "CONFIRM_RECEIVED_COMMAND"      # Ожидаемое подтверждение команды
     _command_rejected_msg: str = "UNKNOWN_COMMAND"      # Отказ МК: команда не распознана
 
-    _end_of_calibration_msg: str = "END_OF_CALIBRATION"     # Сообщение о завершение калибровки
     _end_of_static_init_msg: str = "END_OF_STATIC_INIT"     # Сообщение о завершение набора статического буфера
 
     # Константы форматов пакетов протокола
@@ -72,8 +71,7 @@ class DecoderTelega(DeviceDecoder[TelegaData]):
         super().__init__(signal_bus, mc_logger)
         self._telega_decoder_logger: logging.Logger = mc_logger.get_child_logger("BaseDecoder.DeviceDecoder.TelegaDecoder")
 
-        # Сохраним обработчики _end_of_calibration_msg и _end_of_static_init_msg
-        self._msg_to_handler[self._end_of_calibration_msg] = self._end_of_calibration
+        # Сохраним обработчик завершения набора статического буфера.
         self._msg_to_handler[self._end_of_static_init_msg] = self._end_of_static_init
 
         # Сохраним переданный путь к бинарному файлу
@@ -97,44 +95,6 @@ class DecoderTelega(DeviceDecoder[TelegaData]):
         if self._bin_file:
             self._bin_file.write(bt)
         await super().on_byte_received(bt)
-
-    # =============================================================
-    # =================== Публичные методы ========================
-    # =============================================================
-
-    def save_received_data(self, filepath: Path, sep: str = ' ') -> None:
-        """Сохраняет все накопленные данные декодера в CSV-файл.
-
-        Формат: PackageNum, AccX, AccY, AccZ, GyroX, GyroY, GyroZ.
-        Числа с плавающей точкой записываются с точкой как десятичным
-        разделителем — поэтому разделитель полей по умолчанию пробел.
-
-        Args:
-            filepath (Path): Путь к файлу сохранения.
-            sep (str):       Разделитель полей. По умолчанию пробел.
-
-        Raises:
-            ValueError: Если нет данных для сохранения.
-        """
-        if not self.received_data:
-            raise ValueError('Нет данных для сохранения. Список received_data пуст.')
-
-        file_path = Path(filepath)
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-
-        with open(file_path, 'w', encoding='utf-8') as file:
-            file.write(
-                f'PackageNum{sep}DppCode{sep}'
-                f'AccX{sep}AccY{sep}AccZ{sep}'
-                f'GyroX{sep}GyroY{sep}GyroZ\n'
-            )
-            for data in self.received_data:
-                file.write(
-                    f'{data.package_num}{sep}'
-                    f'{data.dpp_code}{sep}'
-                    f'{data.acc.x_coord}{sep}{data.acc.y_coord}{sep}{data.acc.z_coord}{sep}'
-                    f'{data.gyro.x_coord}{sep}{data.gyro.y_coord}{sep}{data.gyro.z_coord}\n'
-                )
 
     # =============================================================
     # ================= Внутренняя логика =========================
@@ -166,10 +126,6 @@ class DecoderTelega(DeviceDecoder[TelegaData]):
             temp=           bytes_to_float(byte_list[TelegaDataIndexes.temp_index: TelegaDataIndexes.temp_index + 4]),
             dpp_code=       bytes_to_int32(byte_list[TelegaDataIndexes.dpp_code_index: TelegaDataIndexes.dpp_code_index + 4])
         )
-
-    async def _end_of_calibration(self) -> None:
-        """ Процедура завершения калибровки """
-        await self._bus.stop_calibration.emit()
 
     async def _end_of_static_init(self) -> None:
         """ Процедура завершения набора статического буфера перед проездом """

@@ -11,6 +11,7 @@
 """
 
 # System imports
+import asyncio
 from abc import abstractmethod
 from collections.abc import Coroutine
 from typing import Any, Callable, Optional, TypeAlias, Awaitable
@@ -89,13 +90,20 @@ class DeviceDecoder(BaseDecoder[T]):
 
         self._device_decoder_logger = mc_logger.get_child_logger("BaseDecoder.DeviceDecoder")
         self._bus: McBus = signal_bus       # Используемая сигнальная шина
-        self.received_data: list[T] = []    # Список полученных пакетов данных
+        self._data_count: int = 0           # Количество декодированных пакетов данных
+
+        # Разрешение публикации отделяет декодирование управляющих сообщений
+        # от передачи телеметрии подписчикам между этапами сбора данных.
+        self._package_publishing_enabled: bool = False
+        self._package_publishing_lock: asyncio.Lock = asyncio.Lock()
 
         # Сохранённое состояние автомата на время обработки heartbeat / команды
         self._saved_state: Optional[SavedState] = None
 
         # Самостоятельная подписка на сигналы шины
         self._bus.new_byte.subscribe(self)
+        self._bus.drain_packages.subscribe(self)
+        self._bus.enable_package_publishing.subscribe(self)
         self._bus.handshake_init.subscribe(self)
         self._bus.heartbeat_sent.subscribe(self)
         self._bus.command_sent.subscribe(self)
@@ -108,6 +116,8 @@ class DeviceDecoder(BaseDecoder[T]):
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> bool:
         """Отпишемся от всех сигналов шины."""
         self._bus.new_byte.unsubscribe(self)
+        self._bus.drain_packages.unsubscribe(self)
+        self._bus.enable_package_publishing.unsubscribe(self)
         self._bus.handshake_init.unsubscribe(self)
         self._bus.heartbeat_sent.unsubscribe(self)
         self._bus.command_sent.unsubscribe(self)
@@ -127,6 +137,21 @@ class DeviceDecoder(BaseDecoder[T]):
         """
         await self._byte_queue.put(bt)
         # self._device_decoder_logger.debug(f'Получен новый байт: bt = {bt}')
+
+    async def on_drain_packages(self) -> None:
+        """Запрещает новые пакеты и ждёт отправки уже поставленных в очередь."""
+        async with self._package_publishing_lock:
+            self._package_publishing_enabled = False
+
+        await self.wait_for_packages()
+        self._device_decoder_logger.debug('Очередь публикации пакетов осушена')
+
+    async def on_enable_package_publishing(self) -> None:
+        """Разрешает публикацию новых декодированных пакетов данных."""
+        async with self._package_publishing_lock:
+            self._package_publishing_enabled = True
+
+        self._device_decoder_logger.debug('Публикация пакетов разрешена')
 
     async def on_handshake_init(self) -> None:
         """Обработчик сигнала HANDSHAKE_INIT — чистит состояние FSM.
@@ -174,8 +199,8 @@ class DeviceDecoder(BaseDecoder[T]):
 
     @property
     def data_len(self) -> int:
-        """Возвращает количество накопленных пакетов данных IMU."""
-        return len(self.received_data)
+        """Возвращает количество декодированных пакетов данных."""
+        return self._data_count
 
     # =============================================================
     # ================= Внутренняя логика =========================
@@ -188,9 +213,8 @@ class DeviceDecoder(BaseDecoder[T]):
     def _clear(self) -> None:
         """Очищает состояние DeviceDecoder.
 
-        Расширяет BaseDecoder._clear() очисткой received_data и _saved_state.
-        Используется list.clear() вместо переприсваивания, чтобы внешние
-        ссылки на received_data (если они есть) оставались валидными.
+        Расширяет BaseDecoder._clear() очисткой сохранённого состояния
+        конечного автомата.
 
         Вызывается:
           - из BaseDecoder._reset() при входе в контекстный менеджер
@@ -199,8 +223,8 @@ class DeviceDecoder(BaseDecoder[T]):
             HANDSHAKE_INIT (начало работы с новым МК).
         """
         super()._clear()
-        self.received_data.clear()
         self._saved_state = None
+        self._package_publishing_enabled = False
         self._device_decoder_logger.debug('Состояние DeviceDecoder очищено')
 
     def _get_decode_func(self, fmt: bytes) -> Optional[Callable[[list[bytes]], Coroutine[Any, Any, None]]]:
@@ -223,17 +247,17 @@ class DeviceDecoder(BaseDecoder[T]):
         ...
 
     async def _bytes_to_data(self, byte_list: list[bytes]) -> None:
-        """Декодирует список байтов в структуру T
-        с сохранением в received_data и в _package_queue.
-
-        Метод должен быть реализован в наследнике!
+        """Декодирует список байтов в структуру T и помещает пакет в очередь.
 
         Args:
             byte_list (list[bytes]): Список байтов всей посылки.
         """
         data: T = self._bytes_to_protocol_data(byte_list)
-        self.received_data.append(data)
-        await self._package_queue.put(data)
+        self._data_count += 1
+        async with self._package_publishing_lock:
+            if not self._package_publishing_enabled:
+                return
+            await self._package_queue.put(data)
 
     async def _bytes_to_message(self, byte_list: list[bytes]) -> None:
         """Декодирует текстовое сообщение от МК и вызывает соответствующий обработчик.
@@ -334,5 +358,3 @@ class DeviceDecoder(BaseDecoder[T]):
         self._restore_state()
         await self._bus.command_rejected.emit()
         self._device_decoder_logger.warning(f'МК отверг команду: "{self._command_rejected_msg}"')
-
-

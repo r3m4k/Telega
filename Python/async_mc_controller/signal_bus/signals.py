@@ -24,12 +24,14 @@ class Signals(Enum):
     # Decoder → Controller
     PACKAGE_READY = 'PackageReady'
 
+    # Controller → Decoder
+    DRAIN_PACKAGES            = 'DrainPackages'
+    ENABLE_PACKAGE_PUBLISHING = 'EnablePackagePublishing'
+
     # Controller → ComPort
     STOP_EXECUTING      = 'StopExecuting'
     START_MEASURING     = 'StartMeasuring'
     STOP_MEASURING      = 'StopMeasuring'
-    START_CALIBRATION   = 'StartCalibration'
-    STOP_CALIBRATION    = 'StopCalibration'
     START_STATIC_INIT   = 'StartStaticInit'
     STOP_STATIC_INIT    = 'StopStaticInit'
     INTERRUPT_MEASURING = 'InterruptMeasuring'

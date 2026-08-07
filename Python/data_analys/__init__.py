@@ -9,6 +9,7 @@ from .dpp_axis import (
     downsample_common_dpp_table,
 )
 from .file_discovery import discover_run_files
+from .frequency_analysis import FrequencyAnalyser
 from .initialization import initialize_from_static_buffer
 from .inertial import process_inertial_data
 from .models import (
@@ -29,6 +30,7 @@ from .trajectory import compute_trajectory
 __all__ = [
     "DppDownsampleMode",
     "FilterConfig",
+    "FrequencyAnalyser",
     "ProcessingConfig",
     "ProcessingResult",
     "RunDirection",

@@ -26,6 +26,7 @@ dist/
 **/.env
 
 # Logs and profiling output
+**/.logs/
 *.log
 *.log.bkp
 
@@ -42,3 +43,7 @@ Embedded/Debug_Win/
 # OS metadata
 Thumbs.db
 Desktop.ini
+
+Проезды/
+
+Python/.codex/
