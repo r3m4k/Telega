@@ -12,7 +12,7 @@ from typing import Optional
 from PyQt5.QtGui import QCloseEvent, QIcon, QIntValidator
 from PyQt5.QtWidgets import (
     QMainWindow, QToolButton,
-    QPushButton, QApplication, QMessageBox,
+    QPushButton, QMessageBox,
     QComboBox, QLineEdit, QLCDNumber,
     QCheckBox, QListWidget
 )
@@ -112,6 +112,7 @@ class MainWindow(QMainWindow):
         self._close_ready: bool = False
         self._close_task: Optional[asyncio.Task[None]] = None
         self._fatal_recovery_task: Optional[asyncio.Task[None]] = None
+        self._message_boxes: set[QMessageBox] = set()
 
     def _create_components(self) -> None:
         """Создаёт компоненты интерфейса и взаимодействия с сессией."""
@@ -207,10 +208,6 @@ class MainWindow(QMainWindow):
             lambda: self._current_stage.apply_settings()
         )
 
-        app = QApplication.instance()
-        if app is not None:
-            app.aboutToQuit.connect(self._indicator_blinker.stop)
-
     def _start_indicator(self) -> None:
         """Запускает индикатор активности приложения."""
         self._indicator_blinker.start()
@@ -231,7 +228,6 @@ class MainWindow(QMainWindow):
 
         event.ignore()
         self.hide()
-        self._indicator_blinker.stop()
         if self._close_task is None:
             self._close_task = asyncio.create_task(
                 self._shutdown_and_close(),
@@ -242,6 +238,9 @@ class MainWindow(QMainWindow):
     async def _shutdown_and_close(self) -> None:
         """Дожидается освобождения ресурсов и повторно закрывает окно."""
         try:
+            # Отмена задачи должна завершиться до остановки общего event loop.
+            await self._indicator_blinker.stop()
+
             recovery_task = self._fatal_recovery_task
             if recovery_task is not None and not recovery_task.done():
                 await recovery_task
@@ -249,7 +248,7 @@ class MainWindow(QMainWindow):
             self._app_logger.info('Корректное завершение работы приложения')
         except Exception as err:
             self._app_logger.exception(
-                f'Ошибка при завершении работы ComPortReader: {err}'
+                f'Ошибка при завершении работы приложения: {err}'
             )
         finally:
             self._close_ready = True
@@ -463,7 +462,7 @@ class MainWindow(QMainWindow):
         self._app_logger.info(message)
         self.add_info_message(message)
         self._set_stage(self._ready_for_measurement_stage)
-        QMessageBox.information(self, title, message)
+        self._show_message(QMessageBox.Information, title, message)
 
     def _measuring_started(self) -> None:
         """Обрабатывает подтверждение запуска измерений."""
@@ -504,10 +503,13 @@ class MainWindow(QMainWindow):
             if failed_operation is _PendingOperation.CONFIGURE:
                 self._saving_params.unlock_input()
                 self._com_port_settings.unlock_input()
-            QMessageBox.warning(self, 'Ошибка выполнения', str(error))
+            self._show_message(
+                QMessageBox.Warning,
+                'Ошибка выполнения',
+                str(error),
+            )
             return
 
-        QMessageBox.critical(self, 'Ошибка выполнения', str(error))
         if self._fatal_recovery_task is None or self._fatal_recovery_task.done():
             self._session_resetting = True
             self._update_controls()
@@ -515,6 +517,11 @@ class MainWindow(QMainWindow):
                 self._recover_from_fatal_error(),
                 name='com_port_reader_fatal_recovery',
             )
+        self._show_message(
+            QMessageBox.Critical,
+            'Ошибка выполнения',
+            str(error),
+        )
 
     async def _recover_from_fatal_error(self) -> None:
         """Штатно освобождает аварийную сессию и возвращает настройки."""
@@ -538,6 +545,40 @@ class MainWindow(QMainWindow):
         self._com_port_settings.unlock_input()
         self._data_visualizer.reset()
         self._set_stage(self._setting_stage)
+
+    # =============================================================
+    # =============== Неблокирующие сообщения =====================
+    # =============================================================
+
+    def _show_message(self,
+                      icon: QMessageBox.Icon,
+                      title: str,
+                      message: str) -> None:
+        """Показывает модальное сообщение без вложенного event loop.
+
+        Args:
+            icon: Тип значка сообщения.
+            title: Заголовок диалога.
+            message: Текст сообщения.
+        """
+        message_box = QMessageBox(self)
+        message_box.setIcon(icon)
+        message_box.setWindowTitle(title)
+        message_box.setText(message)
+        message_box.setStandardButtons(QMessageBox.Ok)
+        message_box.setModal(True)
+
+        # Сильная ссылка сохраняет Python-объект до сигнала finished.
+        self._message_boxes.add(message_box)
+        message_box.finished.connect(
+            lambda _result, box=message_box: self._release_message_box(box)
+        )
+        message_box.open()
+
+    def _release_message_box(self, message_box: QMessageBox) -> None:
+        """Освобождает закрытый неблокирующий диалог."""
+        self._message_boxes.discard(message_box)
+        message_box.deleteLater()
 
     # =============================================================
     # ================= Пользовательский журнал ===================
