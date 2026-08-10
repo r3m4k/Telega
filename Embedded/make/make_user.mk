@@ -44,7 +44,7 @@ __build_user: ${USER_OBJ}
 __rebuild_user: __clean_user __build_user
 
 __clean_user:
-	@echo Deleting user's object files and generated files
+	@echo "Deleting user's object files and generated files"
 	@rm -f ${USER_OBJ} ${BIN_PLACE}/${BINARY} ${BIN_PLACE}/${PROGRAM_NAME}.hex ${BIN_PLACE}/${PROGRAM_NAME}.map
 
 # --------------------------------
