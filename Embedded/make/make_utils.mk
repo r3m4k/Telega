@@ -23,8 +23,8 @@ __info:
 
 __linking: __info
 	@echo Building "${BIN_PLACE}/${BINARY}", Memory card "${BIN_PLACE}/${PROGRAM_NAME}.map"
-	@$(CC) ${LINK_FLAGS} -o ${BIN_PLACE}/$(BINARY) $(OBJECTS) ${LIBS}
-	@echo $(CC) LINK_FLAGS -o ${BIN_PLACE}/$(BINARY) OBJECTS LIBS
+	@$(CP) ${LINK_FLAGS} -o ${BIN_PLACE}/$(BINARY) $(OBJECTS) ${LIBS}
+	@echo $(CP) LINK_FLAGS -o ${BIN_PLACE}/$(BINARY) OBJECTS LIBS
 	@echo # ---------------------------
 	@echo ${BIN_PLACE}/${BINARY} info:
 	@${GCC_PLACE}/bin/arm-none-eabi-size --format=berkeley ${BIN_PLACE}/${BINARY}

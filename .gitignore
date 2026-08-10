@@ -3,7 +3,6 @@ KiCad/Telega_KiCad-backups/
 
 # IDE and editor files
 .idea/
-.vscode/
 
 # Python virtual environments
 .venv/
