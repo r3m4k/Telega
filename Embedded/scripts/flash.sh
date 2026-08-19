@@ -30,7 +30,13 @@ if [[ ! -f "$elf_file" ]]; then
     exit 1
 fi
 
+openocd_elf_file="$elf_file"
+
+if [[ "${SYSTEM:-}" == "windows" ]]; then
+    openocd_elf_file="$(cygpath -m "$elf_file")"
+fi
+
 "$OPENOCD_EXE" \
     -s "$OPENOCD_SCRIPTS_DIR" \
     -f "$OPENOCD_CONFIG" \
-    -c "program $elf_file verify reset exit"
+    -c "program $openocd_elf_file verify reset exit"
