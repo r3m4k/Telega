@@ -11,7 +11,7 @@
 #include "GpioPin.hpp"
 
 /* Defines -------------------------------------------------------------------*/
-#define INDICATE_LSM303DLHC_READING
+// #define INDICATE_LSM303DLHC_READING
 // #define USE_MAGNETIC_SENSOR
 #define USE_TEMPERATURE_SENSOR
 
@@ -123,34 +123,25 @@ namespace STM_CppLib{
             // ----------------------------------------------------------------
             // Структуры для конфигурации
             LSM303DLHCAcc_InitTypeDef AInitStruct;
-            LSM303DLHCAcc_FilterConfigTypeDef FInitStructure;
 
             // ----------------------------------------------------------------
             // Сконфигурируем параметры акселерометра
             AInitStruct.Power_Mode = LSM303DLHC_NORMAL_MODE;                    // NORMAL or LOWPOWER MODE (CTRL_REG1 ODR[3])
-            AInitStruct.AccOutput_DataRate = LSM303DLHC_ODR_200_HZ;             // output data rate         (CTRL_REG1)
+            AInitStruct.AccOutput_DataRate = LSM303DLHC_ODR_400_HZ;             // output data rate         (CTRL_REG1)
             AInitStruct.Axes_Enable = LSM303DLHC_AXES_ENABLE;                   // enable x, y and z axes	(CTRL_REG1)
             AInitStruct.AccFull_Scale = LSM303DLHC_FULLSCALE_2G;                // full scale               (CTRL_REG4)
-            AInitStruct.BlockData_Update = LSM303DLHC_BlockUpdate_Continous;    // Block data update. Default value: 0; (0: continuous update, 1: output registers not updated until MSB and LSB have been read (CTRL_REG4)
+            AInitStruct.BlockData_Update = LSM303DLHC_BlockUpdate_Single;       // Block data update. Default value: 0; (0: continuous update, 1: output registers not updated until MSB and LSB have been read (CTRL_REG4)
             AInitStruct.Endianness = LSM303DLHC_BLE_LSB;                        // Little Endian: data LSB @ lower address
             AInitStruct.High_Resolution = LSM303DLHC_HR_ENABLE;                 // Acc high resolution enabled
 
             LSM303DLHC_AccInit(&AInitStruct);
 
-            // ----------------------------------------------------------------
-            // Сконфигурируем параметры встроенного фильтра акселерометра
-            FInitStructure.HighPassFilter_Mode_Selection = LSM303DLHC_HPM_NORMAL_MODE;      //??? rejim filtra verhnih chastot 00 Normal mode (reset reading HP_RESET_FILTER) 01 Reference signal for filtering 10 Normal mode 11 Autoreset on interrupt event
-            FInitStructure.HighPassFilter_CutOff_Frequency = LSM303DLHC_HPFCF_32;           // vybor chastoty sreza (8, 16, 32, 64)
-            FInitStructure.HighPassFilter_FDS = LSM303DLHC_HIGHPASSFILTER_ENABLE;           // LSM303DLHC_HIGHPASSFILTER_DISABLE;
-            FInitStructure.HighPassFilter_AOI1 = LSM303DLHC_HPF_AOI1_ENABLE;
-            FInitStructure.HighPassFilter_AOI2 = LSM303DLHC_HPF_AOI2_ENABLE;
-
-            LSM303DLHC_AccFilterConfig(&FInitStructure);
+            LSM303DLHC_AccFilterCmd(LSM303DLHC_HIGHPASSFILTER_DISABLE);         // Отключим High Pass Filter
 
             // ----------------------------------------------------------------
             // Установим чувствительность акселерометра
             uint8_t ctrlx[2];
-            LSM303DLHC_Read(ACC_I2C_ADDRESS, LSM303DLHC_CTRL_REG5_A, ctrlx, 2);
+            LSM303DLHC_Read(ACC_I2C_ADDRESS, LSM303DLHC_CTRL_REG4_A, ctrlx, 2);
 
             if (ctrlx[1] & 0x40)
             {
@@ -183,10 +174,10 @@ namespace STM_CppLib{
             switch (AInitStruct.High_Resolution)
             {
             case LSM303DLHC_HR_ENABLE:
-                cDivider = 64;
+                cDivider = 16;
                 break;
             case LSM303DLHC_HR_DISABLE:
-                cDivider = 16;
+                cDivider = 64;
                 break;
             }
             

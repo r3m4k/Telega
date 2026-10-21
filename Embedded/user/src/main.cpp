@@ -218,7 +218,8 @@ int main()
     // ---------------------------------------------------------------------------
 
     // Изначально добавим FooStage в program_stage_queue
-    program_stage_queue.put(&FooStage);
+    // program_stage_queue.put(&FooStage);
+    program_stage_queue.put(&MeasuringStage);
     ProgramStage* current_stage_ptr = &FooStage;
 
     // ---------------------------------------------------------------------------
@@ -410,6 +411,10 @@ void MeasuringStage_execute(){
         if (sensor_reading_counter++ % 4 == 0) {
             sensor_LSM303DLHC.ReadTemp();
         }
+
+        gyro_value = sensor_L3GD20.gyro_data;
+        acc_value = sensor_LSM303DLHC.acc_data;
+        temp_value = sensor_LSM303DLHC.temperature;
 
         // Обновим данные в посылке и отправим её по com-порту
         telega_package.UpdateData();

@@ -33,7 +33,11 @@
             },
             "problemMatcher": [
                 "$gcc"
-            ]
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            }
         },
         {
             "label": "Сборка файлов пользователя и линковка проекта",

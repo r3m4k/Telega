@@ -12,7 +12,7 @@
 #include "GpioPin.hpp"
 
 /* Defines -------------------------------------------------------------------*/
-#define INDICATE_L3GD20_READING
+// #define INDICATE_L3GD20_READING
 #define TrueAbsGyroVal  4.178074
 
 // -----------------------------------------------------------------------------
