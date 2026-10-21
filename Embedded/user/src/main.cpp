@@ -218,8 +218,7 @@ int main()
     // ---------------------------------------------------------------------------
 
     // Изначально добавим FooStage в program_stage_queue
-    // program_stage_queue.put(&FooStage);
-    program_stage_queue.put(&MeasuringStage);
+    program_stage_queue.put(&FooStage);
     ProgramStage* current_stage_ptr = &FooStage;
 
     // ---------------------------------------------------------------------------
@@ -265,10 +264,8 @@ void InitAll(){
     
     com_port.Init();
 
-    // // Настройка основного таймера с периодом счёта в 250 мс (4 Гц)
-    // uint32_t tim3_period = 2500 - 1;
-    // Настройка основного таймера с периодом счёта в 100 мс (10 Гц)
-    uint32_t tim3_period = 1000 - 1;
+    // Настройка основного таймера с периодом счёта в 5 мс (200 Гц)
+    uint32_t tim3_period = 50 - 1;
     timer3.Init(tim3_period);
 
     // Настройка таймера для мерцания светодиодами с периодом счёта в 2 с
