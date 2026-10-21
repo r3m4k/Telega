@@ -12,13 +12,10 @@
 
 /* Defines -------------------------------------------------------------------*/
 // #define INDICATE_LSM303DLHC_READING
+
+#define USE_ACCELERATION_SENSOR
 // #define USE_MAGNETIC_SENSOR
 #define USE_TEMPERATURE_SENSOR
-
-#define AccCoeff        0.01        // Коэффициент перевода ускорения               [mg] --> [g] 
-#define MagCoeff        100000      // Коэффициент перевода магнитной индукции      [G] --> [nT]
-
-#define TrueMoscowAcc   9.8155f     // Точное значение ускорения свободного падения в Москве
 
 // -----------------------------------------------------------------------------
 
@@ -34,16 +31,17 @@ namespace STM_CppLib{
         * OZ =  oz
         * ------------------------------------------ */
 
+    #ifdef USE_ACCELERATION_SENSOR   
     public:
-        TriaxialData acc_data;          // [м/с**2]
+        TriaxialData acc_data;          // [mg]
     private:
         float LSM_Acc_Sensitivity;      // Чувствительность акселерометра
         uint8_t cDivider;               // Коэффициент делителя
-        float acc_scale_rate = 1.0f;    // Масштабирующий коэффициент
+    #endif /*   USE_ACCELERATION_SENSOR   */
 
     #ifdef USE_MAGNETIC_SENSOR
     public:
-        TriaxialData mag_data;          // [нТ]
+        TriaxialData mag_data;          // [G]
     private:
         // Чувствительность магнитометра по осям
         uint16_t Mag_Sensitivity_XY;
@@ -79,23 +77,32 @@ namespace STM_CppLib{
 
     #endif /*   INDICATE_LSM303DLHC_READING     */
 
-
         // ---------------------------------------------------------------------
         // Методы класса
         // ---------------------------------------------------------------------
+    
     public:
         // Инициализация датчиков 
         // (проиницализируем все датчики в не зависимости от их использования)
         void Init(){
+        
+        #ifdef USE_ACCELERATION_SENSOR
             AccInit();
+        #endif /*   USE_ACCELERATION_SENSOR   */
+            
+        #if defined(USE_MAGNETIC_SENSOR) || defined(USE_TEMPERATURE_SENSOR)
             MagInit();
+        #endif
 
             // Инициализация нужных индикаторов
         #ifdef INDICATE_LSM303DLHC_READING
+        
+        #ifdef USE_ACCELERATION_SENSOR
             // Проинициализируем пин-индикатор и принудительно сбросим его
             acc_reading_indicator_pin.InitPin();
             acc_reading_indicator_pin.ResetPin();
-
+        #endif /*   USE_ACCELERATION_SENSOR   */
+        
         #ifdef USE_MAGNETIC_SENSOR
             mag_reading_indicator_pin.InitPin();
             mag_reading_indicator_pin.ResetPin();
@@ -107,13 +114,6 @@ namespace STM_CppLib{
         #endif /*    USE_TEMPERATURE_SENSOR   */
 
         #endif /*   INDICATE_LSM303DLHC_READING     */
-        }
-
-        void InitAccScaller(){
-            // Вычислим масштабирующий коэффициент для ускорения
-            SensorScaller<LSM303DLHC> acc_scaller{this, &acc_data, TrueMoscowAcc};
-            acc_scaller.Init();
-            acc_scale_rate = acc_scaller.scale_rate;
         }
     
     private:
@@ -243,15 +243,17 @@ namespace STM_CppLib{
 
         // Метод необходим для использования LSM303DLHC в качестве шаблонного параметра
         void ReadData(){
+        #ifdef USE_ACCELERATION_SENSOR
             ReadAcc();
-            
-    #ifdef USE_MAGNETIC_SENSOR
+        #endif /*   USE_ACCELERATION_SENSOR   */
+    
+        #ifdef USE_MAGNETIC_SENSOR
             ReadMag();
-    #endif /*   USE_MAGNETIC_SENSOR   */
+        #endif /*   USE_MAGNETIC_SENSOR   */
 
-    #ifdef USE_TEMPERATURE_SENSOR
+        #ifdef USE_TEMPERATURE_SENSOR
             ReadTemp();
-    #endif /*   USE_TEMPERATURE_SENSOR   */
+        #endif /*   USE_TEMPERATURE_SENSOR   */
         }
 
         void ReadAcc(){
@@ -275,9 +277,6 @@ namespace STM_CppLib{
             acc_data.x_coord =  static_cast<float>(pnRawData[1]) / LSM_Acc_Sensitivity;
             acc_data.y_coord = -static_cast<float>(pnRawData[0]) / LSM_Acc_Sensitivity;
             acc_data.z_coord =  static_cast<float>(pnRawData[2]) / LSM_Acc_Sensitivity;
-
-            acc_data *= AccCoeff;           // Домножим на необходимый весовой коэффициент
-            acc_data *= acc_scale_rate;     // Домножим на необходимый масштабирующий коэффициент
         
         #ifdef INDICATE_LSM303DLHC_READING
             acc_reading_indicator_pin.ResetPin();
